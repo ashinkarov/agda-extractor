@@ -8,7 +8,7 @@ import      Reflection.Name as RN
 open import Agda.Builtin.Reflection using (withReconstructed; dontReduceDefs; onlyReduceDefs)
 
 open import Data.List as L hiding (_++_)
-open import Data.Unit
+open import Data.Unit using (⊤)
 open import Data.Product
 open import Data.Bool
 
@@ -113,10 +113,3 @@ kompile-fold = do
           l ← hlpr l
           return $ absurd-clause tel ps ∷ l
     pat-lam-norm t _ = return t
-
-
-
-
-
-
-

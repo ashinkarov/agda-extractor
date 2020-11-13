@@ -5,7 +5,7 @@ open import Reflection.Name using (Names)
 open import Data.Nat using (ℕ)
 open import Category.Monad.State using (State; StateT; StateMonad; StateTMonad)
 open import Category.Monad using (RawMonad)
-
+open import Data.Product
 
 -- This is a `Maybe`-like data type except that nothing
 -- is extended with a string argument, to carry around the error.
@@ -105,3 +105,17 @@ instance
     return = ok ;
     _>>=_ = λ { (error s) f → error s ; (ok a) f → f a }
     }
+
+liftState : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → M A → StateT S M A
+liftState {RM = RM} x = λ s → return (_, s) ⊛ x
+          where open RawMonad RM
+
+
+liftMState : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → State S A → StateT S M A
+liftMState {RM = RM}{S = S} sa = λ s → return (sa s)
+                          where open RawMonad RM
+
+-- Modify error message in Prog, in case Prog is error.
+err-modify : Prog → (String → String) → Prog
+err-modify (error s) f = error (f s)
+err-modify p _ = p
