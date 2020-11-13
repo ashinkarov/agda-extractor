@@ -3,6 +3,7 @@ open import Structures
 module ExtractSac where
 open import Data.String as S hiding (_++_) --using (String)
 open import Data.List as L hiding (_++_)  --using (List; []; _∷_; [_])
+open import Data.List.Categorical
 open import Data.Nat as N
 open import Data.Nat.Show renaming (show to showNat) -- FIXME instances?
 open import Data.Product hiding (map)
@@ -253,17 +254,11 @@ var-lookup (x ∷ xs) (suc n) = var-lookup xs n
 kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → List String → SKS Prog
 kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
 ... | yes p | vargs rewrite p = do
-                 l ← mapK $ L.map (V.lookup vargs) mask
+                 l ← mapM (λ where (arg _ x) → kompile-term x varctx)
+                          $ L.map (V.lookup vargs) mask
                  return $ ok ", " ++/ l
-              where
-                -- FIXME? This is specialised mapM, is it defined somewhere
-                --        generically?
-                mapK : List $ Arg Term → SKS (List Prog)
-                mapK [] = return []
-                mapK (arg i x ∷ xs) = do
-                     x' ← kompile-term x varctx
-                     xs' ← mapK xs
-                     return $ x' ∷ xs'
+              where open TraversableM (StateMonad KS)
+
 ... | no ¬p | _ = return $ kt "Incorrect argument mask"
 
 kompile-term (var x []) vars = return $ var-lookup (reverse vars) x
