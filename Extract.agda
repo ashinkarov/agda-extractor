@@ -68,10 +68,7 @@ kompile-fold = do
           R.modify λ k → record k{ funs = fs }
           kompile-fold
         false → do
-          -- FIXME? We have one monad inside the other (StateT TC))
-          --        and I need to do a few operations within TC.
-          --        Not sure whether this is the most elegant way.
-          q ← λ _ → do
+          (ty , te) ← liftState {RM = monadTC} $ do
               ty ← getType f
               ty ← withReconstructed $ dontReduceDefs ba $ normalise ty
               te ← withReconstructed $ getDefinition f >>= λ where
@@ -83,13 +80,15 @@ kompile-fold = do
                     --(data-cons d) → return $ con d []
                     _ → return unknown
               te ← pat-lam-norm te ba
-              -- Compile the function and make an error more specific in
-              -- case compilation fails.
-              case kompile-fun ty te f $ ks fs ba (f ∷ done) c of λ where
-                (error s , k) → return (error ("in function " ++ showName f ++ ": " ++ s) , k)
-                p             → return p
+              return $ ty , te
+          R.put (ks fs ba (f ∷ done) c)
+          -- Compile the function and make an error more specific in
+          -- case compilation fails.
+          q ← liftMState {RM = monadTC} $ kompile-fun ty te f
+          let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
+          -- Do the rest of the functions
           p ← kompile-fold
-          return (q ⊕ "\n\n" ⊕ p)
+          return $ q ⊕ "\n\n" ⊕ p
   where
     -- This function normalises inside of the clauses of the
     -- function.  The main usecase is to push the rewriting
