@@ -183,20 +183,19 @@ private
   kc : String → Prog
   kc x = error $ "kompile-cls: " ++ x
 
+  _>>=e_ : ∀ {a}{X : Set a} → Err X → (X → SKS Prog) → SKS Prog
+  (error s) >>=e _ = return $ error s
+  (ok x)    >>=e f = f x
+
+
 kompile-cls [] ctx ret = return $ kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
---   return $ "vars: " ⊕ (", " ++/ L.map (λ where (v ∈ t) → v ++ " : " ++ t) ctx)
-
-  -- FIXME? we'd have to repeat this pattern for ecah of the 4 cases:
-  -- {absurd, normal} × {1-clause, many-clauses}.  Is there a better way?
-  -- `kompile-clpats` returns Err PatSt, but we are in SKS (Err String) monad...
-  case kompile-clpats tel ps ctx defaultPatSt of λ where
-    (error s) → return (error s)
-    (ok (mk vars assgns conds _)) → do
-      t ← kompile-term t vars
-      let as = "\n" ++/ assgns
-      return $ as ⊕ "\n"
-             ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+    let (mk vars assgns _ _) = pst
+    t ← kompile-term t vars
+    let as = "\n" ++/ assgns
+    return $ as ⊕ "\n"
+           ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
 kompile-cls (absurd-clause tel ps ∷ cs) ctx ret = return $ error "TODO₂"
 kompile-cls (clause tel ps t ∷ xs@(_ ∷ _)) ctx ret = return $ error "TODO₃"
