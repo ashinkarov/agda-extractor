@@ -10,6 +10,7 @@ open import Data.Product hiding (map)
 open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
 open import Data.Vec as V using (Vec; updateAt)
 open import Data.Char renaming (_≈?_ to _c≈?_)
+open import Data.Bool
 
 open import Category.Monad
 open import Category.Monad.State
@@ -208,19 +209,18 @@ tel-lookup-name tel n with n N.<? L.length (reverse tel)
 ... | yes n<l = ok $ proj₁ $ lookup (reverse tel) $ fromℕ< n<l
 ... | no _ = error "Variable lookup in telescope failed"
 
--- FIXME? Not sure where it is best to define such functions.  In record?
---        but then I'd have to open a record per file...
-_+=c_ : PatSt → String → PatSt
-p +=c c = record p { conds = PatSt.conds p ++ [ c ] }
+private
+  _+=c_ : PatSt → String → PatSt
+  p +=c c = record p { conds = PatSt.conds p ++ [ c ] }
 
-_+=a_ : PatSt → String → PatSt
-p +=a a = record p { assigns = PatSt.assigns p ++ [ a ] }
+  _+=a_ : PatSt → String → PatSt
+  p +=a a = record p { assigns = PatSt.assigns p ++ [ a ] }
 
-_+=v_ : PatSt → String → PatSt
-p +=v v = record p { vars = PatSt.vars p ++ [ v ] }
+  _+=v_ : PatSt → String → PatSt
+  p +=v v = record p { vars = PatSt.vars p ++ [ v ] }
 
-_+=n_ : PatSt → ℕ → PatSt
-p +=n n = record p { cnt = PatSt.cnt p + 1 }
+  _+=n_ : PatSt → ℕ → PatSt
+  p +=n n = record p { cnt = PatSt.cnt p + 1 }
 
 kompile-clpats tel (arg i (con c ps) ∷ l) (v ∈ _ ∷ ctx) pst
                with c
@@ -229,13 +229,19 @@ kompile-clpats tel (arg i (con c ps) ∷ l) (v ∈ _ ∷ ctx) pst
 
 kompile-clpats tel (arg (arg-info visible r) (var i) ∷ l) (v ∈ _ ∷ vars) pst = do
            s ← tel-lookup-name tel i
-           -- FIXME? this code results in a meta when calling
-           --        `kompile bar [] []`.  Weird...
-           let pst' = case s ≈? "_" of λ where
-                        (no _) → pst +=a (s ++ " = " ++ v ++ ";")
-                        _ → pst
-           --let pst' = pst +=a (s ++ " = " ++ v ++ ";")
-           kompile-clpats tel l vars $ pst' +=v s
+           let pst = pst +=v s
+           let pst = if does (s ≈? "_")
+                     then pst
+                     else pst +=a (s ++ " = " ++ v ++ ";")
+           {-
+           -- XXX If I replace the above if with this one, I end up with
+           -- the unsolved meta in the test₂ in Example.agda.  Is this a bug?
+           let pst = case (s ≈? "_") of λ where
+                      (yes _) → pst
+                      (no _)  → pst +=a (s ++ " = " ++ v ++ ";")
+           -}
+           kompile-clpats tel l vars pst
+ 
 kompile-clpats _ [] [] pst = ok pst
 kompile-clpats tel ps ctx patst = error "TODO₅"
 
