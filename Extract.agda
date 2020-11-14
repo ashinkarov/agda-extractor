@@ -68,9 +68,6 @@ kompile-fold = do
           R.modify λ k → record k{ funs = fs }
           kompile-fold
         false → do
-          -- FIXME? We have one monad inside the other (StateT TC))
-          --        and I need to do a few operations within TC.
-          --        Not sure whether this is the most elegant way.
           q ← λ _ → do
               ty ← getType f
               ty ← withReconstructed $ dontReduceDefs ba $ normalise ty

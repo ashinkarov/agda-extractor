@@ -2,6 +2,7 @@ open import Data.String using (String)
 open import Data.List using (List; []; _∷_)
 open import Reflection using (TC)
 open import Reflection.Name using (Names)
+import Reflection.TypeChecking.Monad.Categorical as RCat
 open import Data.Nat using (ℕ)
 open import Category.Monad.State using (State; StateT; StateMonad; StateTMonad)
 open import Category.Monad using (RawMonad)
@@ -90,10 +91,8 @@ SKS = State KS
 TCS = StateT KS TC
 
 instance
-  monadTC : ∀ {f} → RawMonad {f} TC
-  monadTC = record { return = Reflection.return ; _>>=_ = Reflection._>>=_ }
+  monadTC = RCat.monad
 
---instance
   monadTCS : RawMonad TCS
   monadTCS = StateTMonad KS monadTC
 

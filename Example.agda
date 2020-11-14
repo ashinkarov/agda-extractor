@@ -33,3 +33,4 @@ test₂ : kompile bar [] [] ≡ (ok $ "// Function Example.bar\n"
                                ++ "return __ret;\n"
                                ++ "}\n\n\n\n")
 test₂ = refl
+
