@@ -1,12 +1,22 @@
 open import Data.String using (String)
 open import Data.List using (List; []; _∷_)
+open import Data.Nat using (ℕ)
+open import Data.Product
+open import Data.Bool
+
 open import Reflection using (TC)
 open import Reflection.Name using (Names)
 import Reflection.TypeChecking.Monad.Categorical as RCat
-open import Data.Nat using (ℕ)
+
 open import Category.Monad.State using (State; StateT; StateMonad; StateTMonad)
 open import Category.Monad using (RawMonad)
-open import Data.Product
+
+--open import Relation.Binary.PropositionalEquality hiding ([_])
+open import Relation.Nullary
+import      Relation.Unary as UR
+open import Relation.Nullary.Negation using (contradiction)
+
+
 
 -- This is a `Maybe`-like data type except that nothing
 -- is extended with a string argument, to carry around the error.
@@ -87,6 +97,8 @@ record KS : Set where
         done : Names   -- Functions that we have processed.
         cnt  : ℕ       -- Source of fresh variables
 
+defaultKS = ks [] [] [] 1
+
 SKS = State KS
 TCS = StateT KS TC
 
@@ -118,3 +130,22 @@ lift-mstate {RM = RM}{S = S} sa = λ s → return (sa s)
 err-modify : Prog → (String → String) → Prog
 err-modify (error s) f = error (f s)
 err-modify p _ = p
+
+-- Check if there exists an element in the list that satisfies the predicate P.
+list-has-el : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → Bool
+list-has-el P? [] = false
+list-has-el P? (x ∷ xs) with P? x
+... | yes _ = true
+... | no  _ = list-has-el P? xs
+
+list-filter : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → List A
+list-filter P? [] = []
+list-filter P? (x ∷ xs) with P? x
+... | yes _ = x ∷ list-filter P? xs
+... | no  _ = list-filter P? xs
+
+
+dec-neg :  ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → UR.Decidable (UR._∉ P)
+dec-neg P? x with P? x
+... | yes p = no λ ¬p → contradiction p ¬p
+... | no ¬p = yes ¬p

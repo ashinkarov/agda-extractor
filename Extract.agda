@@ -18,16 +18,6 @@ open import Category.Monad using (RawMonad)
 open import Category.Monad.State
 open RawMonad {{...}} public
 
-open import Relation.Nullary
-import      Relation.Unary as UR
-
-
--- Check if there exists an element in the list that satisfies the predicate P.
-list-has-el : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → Bool
-list-has-el P? [] = false
-list-has-el P? (x ∷ xs) with P? x
-... | yes _ = true
-... | no  _ = list-has-el P? xs
 
 {-# TERMINATING #-}
 kompile-fold   : TCS Prog

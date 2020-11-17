@@ -5,12 +5,14 @@ open import Data.String as S hiding (_++_) --using (String)
 open import Data.List as L hiding (_++_)  --using (List; []; _∷_; [_])
 open import Data.List.Categorical
 open import Data.Nat as N
+open import Data.Nat.Properties as N
 open import Data.Nat.Show renaming (show to showNat) -- FIXME instances?
 open import Data.Product hiding (map)
 open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
 open import Data.Vec as V using (Vec; updateAt)
 open import Data.Char renaming (_≈?_ to _c≈?_)
 open import Data.Bool
+open import Data.Fin as F using (Fin; zero; suc; inject₁)
 
 open import Category.Monad
 open import Category.Monad.State
@@ -51,6 +53,7 @@ record PS : Set where
                       -- is known upfront.  We need this to generate assertions from the
                       -- return type.
     assrts : Assrts   -- Assertions that we generate per each variable.
+    kst : KS          -- Compilation state (in case we have to extract some functions used in types)
 
 
 defaultPS : PS
@@ -59,6 +62,7 @@ defaultPS = record { cnt = 1
                    ; ctx = []
                    ; ret = "__ret"
                    ; assrts = []
+                   ; kst = defaultKS
                    }
 
 -- Pack the information about new variables generated
@@ -93,8 +97,9 @@ SPS = State PS
 -- The main function kit to extract sac functions.
 kompile-fun    : Type → Term → Name → SKS Prog
 kompile-pi     : Type → SPS Prog
-kompile-cls    : Clauses → List VarTy → (ret : String) → SKS Prog
-kompile-clpats : Telescope → (pats : List $ Arg Pattern) → List VarTy → PatSt → Err PatSt
+kompile-cls    : Clauses → (vars : Strings) → (ret : String) → SKS Prog
+kompile-clpats : Telescope → (pats : List $ Arg Pattern) → (vars : Strings) → PatSt → Err PatSt
+{-# TERMINATING #-}
 kompile-term   : Term → (varctx : Strings) → SKS Prog
 
 
@@ -123,25 +128,27 @@ private
   kf : String → Prog
   kf x = error $ "kompile-fun: " ++ x
 
+  module R = RawMonadState (StateMonadState KS)
+
 kompile-fun ty (pat-lam [] []) n =
   return $ kf "got zero clauses in a lambda term"
 kompile-fun ty (pat-lam cs []) n = do
-  let (rt , ps) = kompile-pi ty defaultPS
+  kst ← R.get
+  let (rt , ps) = kompile-pi ty $ record defaultPS{ kst = kst }
       rv = PS.ret ps
       ns = showName n
-      args = ", " ++/ L.map (λ { (v ∈ t) → t ++ " " ++ v }) (PS.ctx ps)
-      -- TODO
-      --cs = collect-var-cons (cons ps) []
-      --args-assrts = map proj₂ $ fltr cs rv
-      --ret-assrts = lkup-var-cons cs rv
-  b ← kompile-cls cs (PS.ctx ps) rv
+      args = ", " ++/ L.map (λ where (v ∈ t) → t ++ " " ++ v) (PS.ctx ps)
+      ret-assrts = list-filter (λ where (mk v _) → v ≈? rv) $ PS.assrts ps
+      arg-assrts = list-filter (dec-neg λ where (mk v _) → v ≈? rv) $ PS.assrts ps
+  R.put $ PS.kst ps
+  b ← kompile-cls cs (L.map (λ where (v ∈ _) → v) $ PS.ctx ps) rv
   return $ "// Function " ⊕ ns ⊕ "\n"
          ⊕ rt ⊕ "\n"
          ⊕ nnorm ns ⊕ "(" ⊕ args ⊕ ") {\n"
-         -- ⊕ args-assrts
+         ⊕ "\n" ++/ L.map Assrt.a arg-assrts
          ⊕ rt ⊕ " " ⊕ rv ⊕ ";\n"
          ⊕ b -- function body
-         -- ⊕ ret-assrts
+         ⊕ "\n" ++/ L.map Assrt.a ret-assrts
          ⊕ "return " ⊕ rv ⊕ ";\n"
          ⊕ "}\n\n"
 
@@ -153,7 +160,17 @@ private
   kp : String → Prog
   kp x = error $ "kompile-pi: " ++ x
 
-module P = RawMonadState (StateMonadState PS)
+  module P = RawMonadState (StateMonadState PS)
+
+  lift-ks : ∀ {X} → SKS X → SPS X
+  lift-ks xf sps = let (x , sks) = xf (PS.kst sps) in x , record sps {kst = sks}
+
+  sps-kompile-term : Term → SPS Prog
+  sps-kompile-term t = do
+    ps ← P.get
+    lift-ks $ kompile-term t (L.map (λ where (v ∈ _) → v) $ PS.ctx ps)
+
+
 kompile-pi (Π[ s ∶ arg i x ] y) = case x of λ where
   (pi _ _) → return $ kp "higher-order functions are not supported"
   _ → do
@@ -168,9 +185,13 @@ kompile-pi (Π[ s ∶ arg i x ] y) = case x of λ where
 
 kompile-pi (con c args) =
   return $ kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
-kompile-pi (def f args) with f
-...                   | quote ℕ = return $ ok "int"
-...                   | _ = return $ kp "TODO₁"
+kompile-pi (def (quote ℕ) args) = return $ ok "int"
+kompile-pi (def (quote Fin) (arg _ x ∷ [])) = do
+  (ok p) ← sps-kompile-term x where e → return e
+  P.modify λ k → let v = PS.cur k in record k { assrts = mk v ("/* assert (" ++ v ++ " < " ++ p ++ ") */") ∷ PS.assrts k }
+  return $ ok "int"
+kompile-pi (def _ _) = return $ kp "TODO₁"
+
 kompile-pi unknown =
   return $ kp "found unknown in type"
 kompile-pi (meta _ _) =
@@ -192,15 +213,26 @@ private
 kompile-cls [] ctx ret = return $ kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
   kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
-    let (mk vars assgns _ _) = pst
-    t ← kompile-term t vars
-    let as = "\n" ++/ assgns
-    return $ as ⊕ "\n"
-           ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+  let (mk vars assgns _ _) = pst
+  t ← kompile-term t vars
+  let as = "\n" ++/ assgns
+  return $ as ⊕ "\n"
+         ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
 kompile-cls (absurd-clause tel ps ∷ cs) ctx ret = return $ error "TODO₂"
-kompile-cls (clause tel ps t ∷ xs@(_ ∷ _)) ctx ret = return $ error "TODO₃"
-
+kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
+  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  let (mk vars assgns conds _) = pst
+      cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
+      as = "\n" ++/ assgns
+  t ← kompile-term t vars
+  r ← kompile-cls ts ctx ret
+  return $ "if (" ⊕ cs ⊕ ") {\n"
+         ⊕ as ⊕ "\n"
+         ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+         ⊕ "} else {\n"
+         ⊕ r ⊕ "\n"
+         ⊕ "}\n"
 
 
 
@@ -210,6 +242,7 @@ tel-lookup-name tel n with n N.<? L.length (reverse tel)
 ... | no _ = error "Variable lookup in telescope failed"
 
 private
+  infixl 10 _+=c_ _+=a_ _+=v_ _+=n_
   _+=c_ : PatSt → String → PatSt
   p +=c c = record p { conds = PatSt.conds p ++ [ c ] }
 
@@ -222,39 +255,75 @@ private
   _+=n_ : PatSt → ℕ → PatSt
   p +=n n = record p { cnt = PatSt.cnt p + 1 }
 
-kompile-clpats tel (arg i (con c ps) ∷ l) (v ∈ _ ∷ ctx) pst
-               with c
-...            | quote N.zero = kompile-clpats tel l ctx $ pst +=c (v ++ " == 0")
-...            | _ = error "TODO₄"
+  pst-fresh : PatSt → String → Err $ String × PatSt
+  pst-fresh pst x =
+    return $ x ++ showNat (PatSt.cnt pst) , pst +=n 1
 
-kompile-clpats tel (arg (arg-info visible r) (var i) ∷ l) (v ∈ _ ∷ vars) pst = do
-           s ← tel-lookup-name tel i
-           let pst = pst +=v s
-           let pst = if does (s ≈? "_")
-                     then pst
-                     else pst +=a (s ++ " = " ++ v ++ ";")
-           {-
-           -- XXX If I replace the above if with this one, I end up with
-           -- the unsolved meta in the test₂ in Example.agda.  Is this a bug?
-           let pst = case (s ≈? "_") of λ where
-                      (yes _) → pst
-                      (no _)  → pst +=a (s ++ " = " ++ v ++ ";")
-           -}
-           kompile-clpats tel l vars pst
- 
+kompile-clpats tel (arg i (con (quote N.zero) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c (v ++ " == 0")
+kompile-clpats tel (arg i (con (quote N.suc) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) ((v ++ " - 1") ∷ ctx) $ pst +=c (v ++ " > 0")
+
+kompile-clpats tel (arg i (con (quote F.zero) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c (v ++ " == 0")
+kompile-clpats tel (arg i (con (quote F.suc) ps@(_ ∷ _ ∷ [])) ∷ l) (v ∷ ctx) pst = do
+  (ub , pst) ← pst-fresh pst "ub_"
+  -- XXX here we are not using `ub` in conds.  For two reasons:
+  -- 1) as we have assertions, we should check the upper bound on function entry
+  -- 2) typically, the value of this argument would be Pat.dot, which we ignore
+  --    right now.  It is possible to capture the value of the dot-patterns, as
+  --    they carry the value when reconstructed.
+  kompile-clpats tel (ps ++ l) (ub ∷ (v ++ " - 1") ∷ ctx) $ pst +=c (v ++ " > 0")
+
+kompile-clpats tel (arg _ (con c _) ∷ _) (_ ∷ _) pst =
+  error $ "cannot handle patern-constructor " ++ showName c
+
+kompile-clpats tel (arg (arg-info visible r) (var i) ∷ l) (v ∷ vars) pst = do
+  s ← tel-lookup-name tel i
+  let pst = pst +=v s
+  let pst = if does (s ≈? "_")
+            then pst
+            else pst +=a (s ++ " = " ++ v ++ ";")
+  {-
+  -- XXX If I replace the above if with this one, I end up with
+  -- the unsolved meta in the test₂ in Example.agda.  Is this a bug?
+  let pst = case (s ≈? "_") of λ where
+             (yes _) → pst
+             (no _)  → pst +=a (s ++ " = " ++ v ++ ";")
+  -}
+  kompile-clpats tel l vars pst
+
+kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
+  -- For now we just skip dot patterns.
+  kompile-clpats tel l vars pst
+
 kompile-clpats _ [] [] pst = ok pst
 kompile-clpats tel ps ctx patst = error "TODO₅"
 
 
 
 private
-  kt : String → Prog
-  kt x = error $ "kompile-term: " ++ x
+  kt : String → SKS Prog
+  kt x = return $ error $ "kompile-term: " ++ x
 
-var-lookup : Strings → ℕ → Prog
+var-lookup : Strings → ℕ → SKS Prog
 var-lookup []       _       = kt "Variable lookup failed"
-var-lookup (x ∷ xs) zero    = ok x
+var-lookup (x ∷ xs) zero    = return $ ok x
 var-lookup (x ∷ xs) (suc n) = var-lookup xs n
+
+
+mk-mask : (n : ℕ) → List $ Fin n
+mk-mask zero =    []
+mk-mask (suc n) = L.reverse $ go n (suc n) N.≤-refl
+  where
+    sa<b⇒a<b : ∀ a b → suc a N.< b → a N.< b
+    sa<b⇒a<b zero    (suc b) _        = s≤s z≤n
+    sa<b⇒a<b (suc a) (suc n) (s≤s pf) = s≤s $ sa<b⇒a<b a n pf
+
+    go : (m n : ℕ) → m N.< n → List $ Fin n
+    go 0       _ _ = []
+    go (suc m) n pf = F.fromℕ< pf ∷ go m n (sa<b⇒a<b m n pf)
+
 
 kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → List String → SKS Prog
 kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
@@ -264,12 +333,30 @@ kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
                  return $ ok ", " ++/ l
               where open TraversableM (StateMonad KS)
 
-... | no ¬p | _ = return $ kt "Incorrect argument mask"
+... | no ¬p | _ = kt "Incorrect argument mask"
 
-kompile-term (var x []) vars = return $ var-lookup (reverse vars) x
+kompile-term (var x []) vars = var-lookup (reverse vars) x
 kompile-term (lit l) vars = return $ ok $ showLiteral l
-kompile-term (con c args) vars with c
-...                            | quote N.suc = do args ← kompile-arglist 1 args [ # 0 ] vars
-                                                  return $ "(1 + " ⊕ args ⊕ ")"
-...                            | _ = return $ kt "TODO₆"
-kompile-term t vctx = return $ kt "TODO₇"
+
+kompile-term (con (quote N.zero) _) _ =
+  return $ ok "0"
+kompile-term (con (quote N.suc) args) vars = do
+  args ← kompile-arglist 1 args [ # 0 ] vars
+  return $ "(1 + " ⊕ args ⊕ ")"
+
+kompile-term (con (quote Fin.zero) _) _ =
+  return $ ok "0"
+kompile-term (con (quote Fin.suc) args) vars = do
+  args ← kompile-arglist 2 args [ # 1 ] vars
+  return $ "(1 + " ⊕ args ⊕ ")"
+kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
+
+-- The last pattern in the list of `def` matches
+kompile-term (def n args) vars = do
+  R.modify λ k → record k { funs = KS.funs k ++ [ n ]  }
+  let n = nnorm $ showName n
+      l = L.length args
+  args ← kompile-arglist l args (mk-mask l) vars
+  return $ n ⊕ " (" ⊕ args ⊕ ")"
+
+kompile-term t vctx = kt "TODO₇"

@@ -1,9 +1,12 @@
 {-# OPTIONS --rewriting #-}
 open import ExtractSac as ES using ()
 open import Extract (ES.kompile-fun)
+
 open import Data.Nat
 open import Data.Nat.Properties
 open import Data.List using (List; []; _∷_)
+open import Data.Fin using (Fin; zero; suc; #_)
+
 open import Relation.Binary.PropositionalEquality
 
 open import Reflection
@@ -57,3 +60,29 @@ test₃ : kompile test3-f [] [] ≡ (ok $ "// Function Example.test3-f\n"
                                    ++ "}\n\n\n\n")
 test₃ = refl
 
+
+-- Make sure that we can deal with functions inside
+-- the type and properly collect them while extraction.
+test-4h : ℕ → ℕ
+test-4h x = 1 + x
+
+test-4f : Fin (test-4h 3) → Fin 4
+test-4f a = zero
+
+test₄ : kompile test-4f (quote test-4h ∷ []) [] ≡ ok _
+test₄ = refl
+
+
+-- Test if we can deal with multiple patterns.
+module _ where
+  test-5f : ℕ → ℕ
+  test-5f (suc (suc x)) = x
+  test-5f _ = 0
+
+  test₅ : kompile test-5f [] [] ≡ ok _
+  test₅ = refl
+
+
+  test-6f : Fin 5 → Fin 3
+  test-6f (suc (suc x)) = x
+  test-6f _ = zero
