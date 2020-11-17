@@ -31,6 +31,7 @@ list-has-el P? (x ∷ xs) with P? x
 
 {-# TERMINATING #-}
 kompile-fold   : TCS Prog
+pat-lam-norm : Term → Names → TC Term
 
 macro
   -- Main entry point of the extractor.
@@ -46,19 +47,45 @@ macro
     q ← quoteTC p
     unify hole q
 
-  -- FIXME: this is only for debugging purposes.
+  -- For debugging purposes.
   frefl : Name → List Name → Term → TC ⊤
   frefl f base-funs a = do
-     (function cs) ← withReconstructed (getDefinition f)
-       where _ → quoteTC "ERROR rtest: function expected" >>= unify a
-     let v = (pat-lam cs [])
-     q ← quoteTC v
+
+     ty ← getType f
+     ty ← withReconstructed $ dontReduceDefs base-funs $ normalise ty
+     te ← withReconstructed $ getDefinition f >>= λ where
+           (function cs) → return $ pat-lam cs []
+           _ → return unknown
+     te ← pat-lam-norm te base-funs
+     q ← quoteTC te
      unify a q
+
+
+-- This function normalises inside of the clauses of the
+-- function.  The main usecase is to push the rewriting
+-- rules in the body of the function prior to extraction.
+pat-lam-norm (pat-lam cs args) base-funs = do
+  cs ← hlpr cs
+  return $ pat-lam cs args
+  where
+    hlpr : List Clause → TC $ List Clause
+    hlpr [] = return []
+    hlpr (clause tel ps t ∷ l) = do
+      let ctx = reverse $ L.map proj₂ tel
+      t ← dontReduceDefs base-funs
+          $ inContext ctx
+          $ withReconstructed
+          $ normalise t
+      l ← hlpr l
+      return $ clause tel ps t ∷ l
+    hlpr (absurd-clause tel ps ∷ l) = do
+      l ← hlpr l
+      return $ absurd-clause tel ps ∷ l
+pat-lam-norm t _ = return t
 
 
 -- Traverse through the list of the functions we need to extract
 -- and collect all the definitions.
-module R = RawMonadState (StateTMonadState KS monadTC)
 kompile-fold = do
     s@(ks fs ba done c) ← R.get
     case fs of λ where
@@ -88,25 +115,5 @@ kompile-fold = do
           p ← kompile-fold
           return (q ⊕ "\n\n" ⊕ p)
   where
-    -- This function normalises inside of the clauses of the
-    -- function.  The main usecase is to push the rewriting
-    -- rules in the body of the function prior to extraction.
-    pat-lam-norm : Term → Names → TC Term
-    pat-lam-norm (pat-lam cs args) base-funs = do
-      cs ← hlpr cs
-      return $ pat-lam cs args
-      where
-        hlpr : List Clause → TC $ List Clause
-        hlpr [] = return []
-        hlpr (clause tel ps t ∷ l) = do
-          let ctx = reverse $ L.map proj₂ tel
-          t ← dontReduceDefs base-funs
-              $ inContext ctx
-              $ withReconstructed
-              $ normalise t
-          l ← hlpr l
-          return $ clause tel ps t ∷ l
-        hlpr (absurd-clause tel ps ∷ l) = do
-          l ← hlpr l
-          return $ absurd-clause tel ps ∷ l
-    pat-lam-norm t _ = return t
+    module R = RawMonadState (StateTMonadState KS monadTC)
+
