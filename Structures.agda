@@ -105,13 +105,13 @@ instance
     _>>=_ = λ { (error s) f → error s ; (ok a) f → f a }
     }
 
-liftState : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → M A → StateT S M A
-liftState {RM = RM} x = λ s → return (_, s) ⊛ x
+lift-state : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → M A → StateT S M A
+lift-state {RM = RM} x = λ s → return (_, s) ⊛ x
           where open RawMonad RM
 
 
-liftMState : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → State S A → StateT S M A
-liftMState {RM = RM}{S = S} sa = λ s → return (sa s)
+lift-mstate : ∀ {f}{M}{RM : RawMonad {f} M}{A}{S} → State S A → StateT S M A
+lift-mstate {RM = RM}{S = S} sa = λ s → return (sa s)
                           where open RawMonad RM
 
 -- Modify error message in Prog, in case Prog is error.

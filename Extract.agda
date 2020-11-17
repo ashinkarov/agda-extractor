@@ -95,7 +95,7 @@ kompile-fold = do
           R.modify λ k → record k{ funs = fs }
           kompile-fold
         false → do
-          q ← λ _ → do
+          (ty , te) ← lift-state {RM = monadTC} $ do
               ty ← getType f
               ty ← withReconstructed $ dontReduceDefs ba $ normalise ty
               te ← withReconstructed $ getDefinition f >>= λ where
@@ -107,13 +107,15 @@ kompile-fold = do
                     --(data-cons d) → return $ con d []
                     _ → return unknown
               te ← pat-lam-norm te ba
-              -- Compile the function and make an error more specific in
-              -- case compilation fails.
-              case kompile-fun ty te f $ ks fs ba (f ∷ done) c of λ where
-                (error s , k) → return (error ("in function " ++ showName f ++ ": " ++ s) , k)
-                p             → return p
+              return $ ty , te
+          R.put (ks fs ba (f ∷ done) c)
+          -- Compile the function and make an error more specific in
+          -- case compilation fails.
+          q ← lift-mstate {RM = monadTC} $ kompile-fun ty te f
+          let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
+          -- Do the rest of the functions
           p ← kompile-fold
-          return (q ⊕ "\n\n" ⊕ p)
+          return $ q ⊕ "\n\n" ⊕ p
   where
     module R = RawMonadState (StateTMonadState KS monadTC)
 
