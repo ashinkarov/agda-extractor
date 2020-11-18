@@ -5,6 +5,7 @@ open import Extract (ES.kompile-fun)
 open import Data.Nat
 open import Data.Nat.Properties
 open import Data.List as L using (List; []; _∷_)
+open import Data.Vec as V using (Vec; []; _∷_)
 open import Data.Fin using (Fin; zero; suc; #_)
 
 open import Relation.Binary.PropositionalEquality
@@ -130,6 +131,23 @@ module _ where
   -- generating with foreach macro.
   test-12f : (n : ℕ) → List (List $ Fin n) → ℕ
   test-12f n xs = 10
-
   test₁₂ : kompile test-12f [] [] ≡ ok _
   test₁₂ = refl
+
+
+test-13f : ∀ {n} → Vec ℕ n → Vec ℕ (n + n * n) → ℕ
+test-13f [] _      = 0
+test-13f (x ∷ a) b = x
+test₁₃ : kompile test-13f [] [] ≡ ok _
+test₁₃ = refl
+
+
+test-14f : ∀ {n} → Vec ℕ n → Vec ℕ (n) → Vec ℕ n
+test-14f [] _ = []
+test-14f (x ∷ a) (y ∷ b) = x + y ∷ test-14f a b
+test₁₄ : kompile test-13f [] [] ≡ ok _
+test₁₄ = refl
+
+-- TODO tests
+-- test for dot patterns
+-- test for absurd clauses

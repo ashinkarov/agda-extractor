@@ -9,7 +9,7 @@ open import Data.Nat.Properties as N
 open import Data.Nat.Show renaming (show to showNat) -- FIXME instances?
 open import Data.Product hiding (map)
 open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
-open import Data.Vec as V using (Vec; updateAt)
+open import Data.Vec as V using (Vec; [] ; _∷_) -- ; updateAt)
 open import Data.Char renaming (_≈?_ to _c≈?_)
 open import Data.Bool
 open import Data.Fin as F using (Fin; zero; suc; inject₁)
@@ -196,13 +196,14 @@ kompile-ty (Π[ s ∶ arg i x ] y) true  = do
 kompile-ty (con c args) pi-ok =
   kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
 kompile-ty (def (quote ℕ) args) _ = return $ ok "int"
+kompile-ty (def (quote Bool) args) _ = return $ ok "bool"
 kompile-ty (def (quote Fin) (arg _ x ∷ [])) _ = do
   (ok p) ← sps-kompile-term x where e → return e
   v ← PS.cur <$> P.get
   P.modify $ _p+=a (mk v $′ "assert (" ++ v ++ " < " ++ p ++ ")")
   return $ ok "int"
 
-kompile-ty (def (quote L.List) (_ ∷ arg _ x ∷ _)) _ = do
+kompile-ty (def (quote L.List) (_ ∷ arg _ ty ∷ _)) _ = do
   el ← ps-fresh "el_"
   (v , as) ← < PS.cur , PS.assrts > <$> P.get
   -- Any constraints that the subsequent call would
@@ -211,11 +212,25 @@ kompile-ty (def (quote L.List) (_ ∷ arg _ x ∷ _)) _ = do
   P.modify λ k → record k { cur = el ; assrts = [] }
   -- TODO: we are now assuming that nested arrays are ok
   --       which is not quite true (at least not with this syntax)
-  τ ← kompile-ty x false
+  τ ← kompile-ty ty false
   P.modify λ k → record k {
     cur = v;
     assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
     -- No need to modify context, as we don't allow higher order functions, so it stays the same.
+    }
+  return $ τ ⊕ "[.]"
+
+kompile-ty (def (quote V.Vec) (_ ∷ arg _ ty ∷ arg _ n ∷ [])) _ = do
+  el ← ps-fresh "el_"
+  (v , as) ← < PS.cur , PS.assrts > <$> P.get
+  (ok p) ← sps-kompile-term n where e → return e
+  P.modify λ k → record k { cur = el ; assrts = [] }
+  -- TODO: Nested vectors can be represented as normal multi-dimensional arrays.
+  τ ← kompile-ty ty false
+  P.modify λ k → record k {
+    cur = v;
+    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
+                ++ [ mk v $′ "assert (shape (" ++ v ++ ")[[0]] == " ++ p ++ ")" ]
     }
   return $ τ ⊕ "[.]"
 
@@ -292,6 +307,11 @@ private
   pst-fresh pst x =
     return $ x ++ showNat (PatSt.cnt pst) , pst +=n 1
 
+kompile-clpats tel (arg i (con (quote true) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c (v {- == true -})
+kompile-clpats tel (arg i (con (quote false) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c ("!" ++ v)
+
 kompile-clpats tel (arg i (con (quote N.zero) ps) ∷ l) (v ∷ ctx) pst =
   kompile-clpats tel l ctx $ pst +=c (v ++ " == 0")
 kompile-clpats tel (arg i (con (quote N.suc) ps) ∷ l) (v ∷ ctx) pst =
@@ -313,6 +333,14 @@ kompile-clpats tel (arg i (con (quote L.List.[]) []) ∷ l) (v ∷ ctx) pst =
 kompile-clpats tel (arg i (con (quote L.List._∷_) ps@(_ ∷ _ ∷ [])) ∷ l) (v ∷ ctx) pst =
   kompile-clpats tel (ps ++ l) (("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
                  $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
+
+-- Almost the same as List (extra parameter in cons)
+kompile-clpats tel (arg i (con (quote V.Vec.[]) []) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c ("emptyvec_p (" ++ v ++ ")")
+kompile-clpats tel (arg i (con (quote V.Vec._∷_) ps@(_ ∷ _ ∷ _ ∷ [])) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) (("len (" ++ v ++ ") - 1") ∷ ("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
+                 $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
+
 
 kompile-clpats tel (arg _ (con c _) ∷ _) (_ ∷ _) pst =
   error $ "cannot handle patern-constructor " ++ showName c
@@ -405,8 +433,20 @@ kompile-term (con (quote L.List._∷_) args) vars = do
   args ← kompile-arglist 4 args (# 2 ∷ # 3 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
 
+-- Almost the same as List
+kompile-term (con (quote V.Vec.[]) _) _ =
+  return $ ok "[]"
+kompile-term (con (quote V.Vec._∷_) args) vars = do
+  args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
+  return $ "cons (" ⊕ args ⊕ ")"
 
 kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
+
+
+kompile-term (def (quote N._+_) args) vars =
+  ("_add_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
+kompile-term (def (quote N._*_) args) vars =
+  ("_mul_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
 
 -- The last pattern in the list of `def` matches
 kompile-term (def n args) vars = do
