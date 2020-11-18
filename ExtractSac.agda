@@ -137,15 +137,16 @@ kompile-fun ty (pat-lam cs []) n = do
       args = ", " ++/ L.map (λ where (v ∈ t) → t ++ " " ++ v) (PS.ctx ps)
       ret-assrts = list-filter (λ where (mk v _) → v ≈? rv) $ PS.assrts ps
       arg-assrts = list-filter (dec-neg λ where (mk v _) → v ≈? rv) $ PS.assrts ps
+      assrt-to-code = ("/* " ++_) ∘ (_++ " */") ∘ Assrt.a
   R.put $ PS.kst ps
   b ← kompile-cls cs (L.map (λ where (v ∈ _) → v) $ PS.ctx ps) rv
   return $ "// Function " ⊕ ns ⊕ "\n"
          ⊕ rt ⊕ "\n"
          ⊕ nnorm ns ⊕ "(" ⊕ args ⊕ ") {\n"
-         ⊕ "\n" ++/ L.map Assrt.a arg-assrts
+         ⊕ "\n" ++/ L.map assrt-to-code arg-assrts
          ⊕ rt ⊕ " " ⊕ rv ⊕ ";\n"
          ⊕ b -- function body
-         ⊕ "\n" ++/ L.map Assrt.a ret-assrts
+         ⊕ "\n" ++/ L.map assrt-to-code ret-assrts
          ⊕ "return " ⊕ rv ⊕ ";\n"
          ⊕ "}\n\n"
 
@@ -181,36 +182,57 @@ private
     lift-ks $ kompile-term t (L.map (λ where (v ∈ _) → v) $ PS.ctx ps)
 
 
-kompile-pi (Π[ s ∶ arg i x ] y) = case x of λ where
-  (pi _ _) → kp "higher-order functions are not supported"
-  _ → do
+kompile-ty : Type → (pi-ok : Bool) → SPS Prog
+kompile-ty (Π[ s ∶ arg i x ] y) false = kp "higher-order functions are not supported"
+kompile-ty (Π[ s ∶ arg i x ] y) true  = do
     v ← ps-fresh "x_"
     P.modify λ k → record k { cur = v }
-    (ok t) ← kompile-pi x
+    (ok t) ← kompile-ty x false
       where e → return e
     P.modify λ k → record k { cur = PS.ret k  -- In case this is a return type
                             ; ctx = PS.ctx k ++ [ v ∈ t ] }
-    kompile-pi y
+    kompile-ty y true
 
-kompile-pi (con c args) =
+kompile-ty (con c args) pi-ok =
   kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
-kompile-pi (def (quote ℕ) args) = return $ ok "int"
-kompile-pi (def (quote Fin) (arg _ x ∷ [])) = do
+kompile-ty (def (quote ℕ) args) _ = return $ ok "int"
+kompile-ty (def (quote Fin) (arg _ x ∷ [])) _ = do
   (ok p) ← sps-kompile-term x where e → return e
   v ← PS.cur <$> P.get
-  P.modify $ _p+=a (mk v $′ "/* assert (" ++ v ++ " < " ++ p ++ ") */")
+  P.modify $ _p+=a (mk v $′ "assert (" ++ v ++ " < " ++ p ++ ")")
   return $ ok "int"
 
-kompile-pi (def _ _) = kp "TODO₁"
+kompile-ty (def (quote L.List) (_ ∷ arg _ x ∷ _)) _ = do
+  el ← ps-fresh "el_"
+  (v , as) ← < PS.cur , PS.assrts > <$> P.get
+  -- Any constraints that the subsequent call would
+  -- generate will be constraints about the elements
+  -- of the list.
+  P.modify λ k → record k { cur = el ; assrts = [] }
+  -- TODO: we are now assuming that nested arrays are ok
+  --       which is not quite true (at least not with this syntax)
+  τ ← kompile-ty x false
+  P.modify λ k → record k {
+    cur = v;
+    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
+    -- No need to modify context, as we don't allow higher order functions, so it stays the same.
+    }
+  return $ τ ⊕ "[.]"
 
-kompile-pi unknown =
+kompile-ty (def _ _) _ = kp "TODO₁"
+
+kompile-ty unknown _ =
   kp "found unknown in type"
-kompile-pi (meta _ _) =
+kompile-ty (meta _ _) _ =
   kp  "found meta in type"
-kompile-pi (pat-lam _ _) =
+kompile-ty (pat-lam _ _) _ =
   kp "found pattern-matching lambda in type"
-kompile-pi _ =
+kompile-ty _ _ =
   kp "ERROR"
+
+
+kompile-pi x = kompile-ty x true
+
 
 private
   kc : String → SKS Prog
@@ -286,6 +308,12 @@ kompile-clpats tel (arg i (con (quote F.suc) ps@(_ ∷ _ ∷ [])) ∷ l) (v ∷ 
   --    they carry the value when reconstructed.
   kompile-clpats tel (ps ++ l) (ub ∷ (v ++ " - 1") ∷ ctx) $ pst +=c (v ++ " > 0")
 
+kompile-clpats tel (arg i (con (quote L.List.[]) []) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c ("emptyvec_p (" ++ v ++ ")")
+kompile-clpats tel (arg i (con (quote L.List._∷_) ps@(_ ∷ _ ∷ [])) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) (("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
+                 $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
+
 kompile-clpats tel (arg _ (con c _) ∷ _) (_ ∷ _) pst =
   error $ "cannot handle patern-constructor " ++ showName c
 
@@ -360,6 +388,14 @@ kompile-term (con (quote Fin.zero) _) _ =
 kompile-term (con (quote Fin.suc) args) vars = do
   args ← kompile-arglist 2 args [ # 1 ] vars
   return $ "(1 + " ⊕ args ⊕ ")"
+
+kompile-term (con (quote L.List.[]) _) _ =
+  return $ ok "[]"
+kompile-term (con (quote L.List._∷_) args) vars = do
+  args ← kompile-arglist 4 args (# 2 ∷ # 3 ∷ []) vars
+  return $ "cons (" ⊕ args ⊕ ")"
+
+
 kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
 
 -- The last pattern in the list of `def` matches

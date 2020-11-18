@@ -4,7 +4,7 @@ open import Extract (ES.kompile-fun)
 
 open import Data.Nat
 open import Data.Nat.Properties
-open import Data.List using (List; []; _∷_)
+open import Data.List as L using (List; []; _∷_)
 open import Data.Fin using (Fin; zero; suc; #_)
 
 open import Relation.Binary.PropositionalEquality
@@ -95,3 +95,41 @@ test-7f a b c = c
 test₇ : kompile test-7f [] [] ≡ (ok $ "// Function Example.test-7f\nint\nExample_test_7f(int x_1, int x_2, int x_3) {\n"
                                    ++ "int __ret;\na = x_1;\nb = x_2;\nc = x_3;\n__ret = c;\nreturn __ret;\n}\n\n\n\n")
 test₇ = refl
+
+-- With-clauses
+test-8f : ℕ → ℕ
+test-8f x with x
+test-8f x | zero = 0
+test-8f x | _    = 1
+
+test₈ : kompile test-8f [] [] ≡ ok _
+test₈ = refl
+
+-- Testing lists
+test-9f : List ℕ → List ℕ
+test-9f [] = []
+test-9f (x ∷ xs) = 1 + x ∷ test-9f xs
+
+test₉ : kompile test-9f [] [] ≡ ok _
+test₉ = refl
+
+-- Test constraints accumulated from the list type.
+module _ where
+  test-10f : (n : ℕ) → List (Fin n) → ℕ
+  test-10f n xs = 10
+  test₁₀ : kompile test-10f [] [] ≡ ok _
+  test₁₀ = refl
+
+  -- Higher-order functions are not allowed:
+  test-11f : ℕ → List (ℕ → ℕ)
+  test-11f n = []
+  test₁₁ : kompile test-11f [] [] ≡ error _
+  test₁₁ = refl
+
+  -- Lists can bring per-element constraints, which we are currently
+  -- generating with foreach macro.
+  test-12f : (n : ℕ) → List (List $ Fin n) → ℕ
+  test-12f n xs = 10
+
+  test₁₂ : kompile test-12f [] [] ≡ ok _
+  test₁₂ = refl
