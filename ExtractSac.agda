@@ -121,9 +121,6 @@ nnorm s = ok
     replace f t s = fromList $ L.map (repchar f t) $ toList s
 
 
--- FIXME?: can I make these functions local to kompile-fun?
---         I tried using anonymous module, but then it doesn't like
---         that the definition is outside the module.
 private
   kf : String → Prog
   kf x = error $ "kompile-fun: " ++ x
@@ -157,10 +154,23 @@ kompile-fun _ _ _ =
 
 
 private
-  kp : String → Prog
-  kp x = error $ "kompile-pi: " ++ x
+  kp : String → SPS Prog
+  kp x = return $ error $ "kompile-pi: " ++ x
 
   module P = RawMonadState (StateMonadState PS)
+
+  infixl 10 _p+=c_ _p+=a_
+  _p+=c_ : PS → ℕ → PS
+  ps p+=c n = record ps{ cnt = PS.cnt ps + n }
+
+  _p+=a_ : PS → Assrt → PS
+  ps p+=a a = record ps{ assrts = a ∷ PS.assrts ps }
+
+  ps-fresh : String → SPS String
+  ps-fresh x = do
+    ps ← P.get
+    P.modify (_p+=c 1)
+    return $ x ++ showNat (PS.cnt ps)
 
   lift-ks : ∀ {X} → SKS X → SPS X
   lift-ks xf sps = let (x , sks) = xf (PS.kst sps) in x , record sps {kst = sks}
@@ -172,11 +182,10 @@ private
 
 
 kompile-pi (Π[ s ∶ arg i x ] y) = case x of λ where
-  (pi _ _) → return $ kp "higher-order functions are not supported"
+  (pi _ _) → kp "higher-order functions are not supported"
   _ → do
-    ps@record{cnt = c} ← P.get
-    let v = "x_" ++ showNat c
-    P.put $ record ps { cnt = c + 1; cur = v }
+    v ← ps-fresh "x_"
+    P.modify λ k → record k { cur = v }
     (ok t) ← kompile-pi x
       where e → return e
     P.modify λ k → record k { cur = PS.ret k  -- In case this is a return type
@@ -184,33 +193,35 @@ kompile-pi (Π[ s ∶ arg i x ] y) = case x of λ where
     kompile-pi y
 
 kompile-pi (con c args) =
-  return $ kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
+  kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
 kompile-pi (def (quote ℕ) args) = return $ ok "int"
 kompile-pi (def (quote Fin) (arg _ x ∷ [])) = do
   (ok p) ← sps-kompile-term x where e → return e
-  P.modify λ k → let v = PS.cur k in record k { assrts = mk v ("/* assert (" ++ v ++ " < " ++ p ++ ") */") ∷ PS.assrts k }
+  v ← PS.cur <$> P.get
+  P.modify $ _p+=a (mk v $′ "/* assert (" ++ v ++ " < " ++ p ++ ") */")
   return $ ok "int"
-kompile-pi (def _ _) = return $ kp "TODO₁"
+
+kompile-pi (def _ _) = kp "TODO₁"
 
 kompile-pi unknown =
-  return $ kp "found unknown in type"
+  kp "found unknown in type"
 kompile-pi (meta _ _) =
-  return $ kp  "found meta in type"
+  kp  "found meta in type"
 kompile-pi (pat-lam _ _) =
-  return $ kp "found pattern-matching lambda in type"
+  kp "found pattern-matching lambda in type"
 kompile-pi _ =
-  return $ kp "ERROR"
+  kp "ERROR"
 
 private
-  kc : String → Prog
-  kc x = error $ "kompile-cls: " ++ x
+  kc : String → SKS Prog
+  kc x = return $ error $ "kompile-cls: " ++ x
 
   _>>=e_ : ∀ {a}{X : Set a} → Err X → (X → SKS Prog) → SKS Prog
   (error s) >>=e _ = return $ error s
   (ok x)    >>=e f = f x
 
 
-kompile-cls [] ctx ret = return $ kc "zero clauses found"
+kompile-cls [] ctx ret = kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
   kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns _ _) = pst
@@ -219,7 +230,7 @@ kompile-cls (clause tel ps t ∷ []) ctx ret =
   return $ as ⊕ "\n"
          ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
-kompile-cls (absurd-clause tel ps ∷ cs) ctx ret = return $ error "TODO₂"
+kompile-cls (absurd-clause tel ps ∷ cs) ctx ret = kc "TODO₂"
 kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
   kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns conds _) = pst

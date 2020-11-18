@@ -86,3 +86,12 @@ module _ where
   test-6f : Fin 5 → Fin 3
   test-6f (suc (suc x)) = x
   test-6f _ = zero
+
+
+-- Make sure that we are compiling multi-argument function correctly
+test-7f : (a b c : ℕ) → ℕ
+test-7f a b c = c
+
+test₇ : kompile test-7f [] [] ≡ (ok $ "// Function Example.test-7f\nint\nExample_test_7f(int x_1, int x_2, int x_3) {\n"
+                                   ++ "int __ret;\na = x_1;\nb = x_2;\nc = x_3;\n__ret = c;\nreturn __ret;\n}\n\n\n\n")
+test₇ = refl
