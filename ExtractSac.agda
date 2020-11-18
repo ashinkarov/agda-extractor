@@ -360,9 +360,19 @@ mk-mask (suc n) = L.reverse $ go n (suc n) N.≤-refl
     sa<b⇒a<b (suc a) (suc n) (s≤s pf) = s≤s $ sa<b⇒a<b a n pf
 
     go : (m n : ℕ) → m N.< n → List $ Fin n
-    go 0       _ _ = []
-    go (suc m) n pf = F.fromℕ< pf ∷ go m n (sa<b⇒a<b m n pf)
+    go 0       (suc _) _  = zero ∷ []
+    go (suc m) n       pf = F.fromℕ< pf ∷ go m n (sa<b⇒a<b m n pf)
 
+private
+  module mask-tests where
+    test-mk-mask₁ : mk-mask 0 ≡ []
+    test-mk-mask₁ = refl
+
+    test-mk-mask₂ : mk-mask 1 ≡ # 0 ∷ []
+    test-mk-mask₂ = refl
+
+    test-mk-mask₃ : mk-mask 2 ≡ # 0 ∷ # 1 ∷ []
+    test-mk-mask₃ = refl
 
 kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → List String → SKS Prog
 kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
