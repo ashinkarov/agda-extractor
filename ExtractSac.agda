@@ -108,17 +108,18 @@ kompile-term   : Term → (varctx : Strings) → SKS Prog
 -- symbols with ascii.
 nnorm : String → Prog
 nnorm s = ok
-        $ replace '.' '_'
-        $ replace '-' '_'
+        $ replace '.' "_"
+        $ replace '-' "_"
+        $ replace '+' "plus"
         $ s
   where
-    repchar : (t f x : Char) → Char
-    repchar f t x with x c≈? f
-    ... | yes _ = t
-    ... | no  _ = x
+    repchar : (from : Char) (to : String) (x : Char) → String
+    repchar from to x with does $ x c≈? from
+    ... | true  = to
+    ... | false = fromList (x ∷ [])
 
-    replace : (from to : Char) → String → String
-    replace f t s = fromList $ L.map (repchar f t) $ toList s
+    replace : (from : Char) (to : String) → String → String
+    replace f t s = "" ++/ L.map (repchar f t) (toList s)
 
 
 private
@@ -234,7 +235,14 @@ kompile-ty (def (quote V.Vec) (_ ∷ arg _ ty ∷ arg _ n ∷ [])) _ = do
     }
   return $ τ ⊕ "[.]"
 
-kompile-ty (def _ _) _ = kp "TODO₁"
+kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
+  (ok x) ← sps-kompile-term x where e → return e
+  (ok y) ← sps-kompile-term y where e → return e
+  v ← PS.cur <$> P.get
+  P.modify (_p+=a (mk v $′ "assert (" ++ x ++ " == " ++ y ++ ")"))
+  return $ ok "unit"
+
+kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
 
 kompile-ty unknown _ =
   kp "found unknown in type"
@@ -341,11 +349,15 @@ kompile-clpats tel (arg i (con (quote V.Vec._∷_) ps@(_ ∷ _ ∷ _ ∷ [])) �
   kompile-clpats tel (ps ++ l) (("len (" ++ v ++ ") - 1") ∷ ("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
                  $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
 
+kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
+  -- No constraints, as there could only be a single value.
+  kompile-clpats tel l ctx pst
 
 kompile-clpats tel (arg _ (con c _) ∷ _) (_ ∷ _) pst =
   error $ "cannot handle patern-constructor " ++ showName c
 
-kompile-clpats tel (arg (arg-info visible r) (var i) ∷ l) (v ∷ vars) pst = do
+kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
+  -- Note that we do not distinguish between hidden and visible variables
   s ← tel-lookup-name tel i
   let pst = pst +=v s
   let pst = if does (s ≈? "_")
@@ -365,7 +377,9 @@ kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
   kompile-clpats tel l vars pst
 
 kompile-clpats _ [] [] pst = ok pst
-kompile-clpats tel ps ctx patst = error "TODO₅"
+kompile-clpats tel ps ctx patst = error $ "kompile-clpats failed, pattern: ["
+                                       ++ (", " ++/ L.map (λ where (arg _ x) → showPattern x) ps)
+                                       ++ "], ctx: [" ++ (", " ++/ ctx) ++ "]"
 
 
 
@@ -440,6 +454,9 @@ kompile-term (con (quote V.Vec._∷_) args) vars = do
   args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
 
+kompile-term (con (quote refl) _) _ =
+  return $ ok "tt"
+
 kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
 
 
@@ -456,4 +473,4 @@ kompile-term (def n args) vars = do
   args ← kompile-arglist l args (mk-mask l) vars
   return $ n ⊕ " (" ⊕ args ⊕ ")"
 
-kompile-term t vctx = kt "TODO₇"
+kompile-term t vctx = kt $ "failed to compile term `" ++ showTerm t ++ "`"

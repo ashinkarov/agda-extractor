@@ -105,7 +105,7 @@ kompile-fold = do
           let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
           -- Do the rest of the functions
           p ← kompile-fold
-          return $ q ⊕ "\n\n" ⊕ p
+          return $ p ⊕ "\n\n" ⊕ q
   where
     module R = RawMonadState (StateTMonadState KS monadTC)
 

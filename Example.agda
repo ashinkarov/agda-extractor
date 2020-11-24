@@ -22,28 +22,28 @@ open import Function
 test1-f : ℕ → ℕ
 test1-f x = 1 + x
 
-test₁ : kompile test1-f [] [] ≡ (ok $ "// Function Example.test1-f\n"
+test₁ : kompile test1-f [] [] ≡ (ok $ "\n\n// Function Example.test1-f\n"
                                    ++ "int\n"
                                    ++ "Example_test1_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = (1 + x);\n"
                                    ++ "return __ret;\n"
-                                   ++ "}\n\n\n\n")
+                                   ++ "}\n\n")
 test₁ = refl
 
 
 test2-f : ℕ → ℕ
 test2-f x = 0
 
-test₂ : kompile test2-f [] [] ≡ (ok $ "// Function Example.test2-f\n"
+test₂ : kompile test2-f [] [] ≡ (ok $ "\n\n// Function Example.test2-f\n"
                                    ++ "int\n"
                                    ++ "Example_test2_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = 0;\n"
                                    ++ "return __ret;\n"
-                                   ++ "}\n\n\n\n")
+                                   ++ "}\n\n")
 test₂ = refl
 
 
@@ -51,14 +51,14 @@ test₂ = refl
 test3-f : ℕ → ℕ
 test3-f x = x + 0
 
-test₃ : kompile test3-f [] [] ≡ (ok $ "// Function Example.test3-f\n"
+test₃ : kompile test3-f [] [] ≡ (ok $ "\n\n// Function Example.test3-f\n"
                                    ++ "int\n"
                                    ++ "Example_test3_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = x;\n"
                                    ++ "return __ret;\n"
-                                   ++ "}\n\n\n\n")
+                                   ++ "}\n\n")
 test₃ = refl
 
 
@@ -93,8 +93,8 @@ module _ where
 test-7f : (a b c : ℕ) → ℕ
 test-7f a b c = c
 
-test₇ : kompile test-7f [] [] ≡ (ok $ "// Function Example.test-7f\nint\nExample_test_7f(int x_1, int x_2, int x_3) {\n"
-                                   ++ "int __ret;\na = x_1;\nb = x_2;\nc = x_3;\n__ret = c;\nreturn __ret;\n}\n\n\n\n")
+test₇ : kompile test-7f [] [] ≡ (ok $ "\n\n// Function Example.test-7f\nint\nExample_test_7f(int x_1, int x_2, int x_3) {\n"
+                                   ++ "int __ret;\na = x_1;\nb = x_2;\nc = x_3;\n__ret = c;\nreturn __ret;\n}\n\n")
 test₇ = refl
 
 -- With-clauses
@@ -145,8 +145,17 @@ test₁₃ = refl
 test-14f : ∀ {n} → Vec ℕ n → Vec ℕ (n) → Vec ℕ n
 test-14f [] _ = []
 test-14f (x ∷ a) (y ∷ b) = x + y ∷ test-14f a b
-test₁₄ : kompile test-13f [] [] ≡ ok _
+test₁₄ : kompile test-14f [] [] ≡ ok _
 test₁₄ = refl
+
+
+test-15f : ∀ {a b} → Fin (a + b) → Fin (b + a)
+test-15f {a}{b} x rewrite (+-comm a b) = x
+
+test₁₅ : let fs = L.[ quote +-comm ] in
+         kompile test-15f fs fs  ≡ ok _
+test₁₅ = refl
+
 
 -- TODO tests
 -- test for dot patterns
