@@ -149,6 +149,8 @@ test₁₄ : kompile test-14f [] [] ≡ ok _
 test₁₄ = refl
 
 
+-- Note that rewrite helper function would generate
+-- the equality type amongst its arguments.
 test-15f : ∀ {a b} → Fin (a + b) → Fin (b + a)
 test-15f {a}{b} x rewrite (+-comm a b) = x
 

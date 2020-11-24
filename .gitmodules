@@ -1,0 +1,3 @@
+[submodule "Arrays"]
+	path = Arrays
+	url = https://github.com/ashinkarov/agda-array
