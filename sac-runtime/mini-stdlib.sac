@@ -1,6 +1,14 @@
 // A very simple set of commonly used sac functions across
 // unit tests.
 
+typedef bool unit;
+#define tt (unit)true
+
+// XXX in principle, these can be inlined when code-generating,
+//     but this just leaves the name of the equality for information
+//     purposes.  We can rethink this decision later.
+inline unit Data_Nat_Properties_plus_comm(int a, int b) { return tt; }
+
 
 // Scalar operations
 inline int + (int a, int b) { return _add_SxS_ (a, b); }
