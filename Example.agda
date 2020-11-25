@@ -159,6 +159,29 @@ test₁₅ : let fs = L.[ quote +-comm ] in
 test₁₅ = refl
 
 
+module absurd-patterns where
+  test-16f : ∀ {n} → Fin n → Fin n
+  test-16f {0}     ()
+  test-16f {suc n} i  = i
+
+  test₁₆ : kompile test-16f [] []  ≡ ok _
+  test₁₆ = refl
+
+  -- Ugh, when we found an absurd pattern, the rest of the
+  -- patterns may or may not be present (which seem to make no sense).
+  -- If they are present, then other (missing) constructors are inserted
+  -- automatically.  Therefore, extracted code for the function below
+  -- would look rather scary.
+  test-17f : ∀ {n} → Fin (n ∸ 1) → ℕ → ℕ → Fin n
+  test-17f {0}       () (suc (suc k))
+  test-17f {1}       ()
+  test-17f {suc (suc n)} i m mm = zero
+
+  test₁₇ : kompile test-16f [] []  ≡ ok _
+  test₁₇ = refl
+
+
+
+
 -- TODO tests
 -- test for dot patterns
--- test for absurd clauses

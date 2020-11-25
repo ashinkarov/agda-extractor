@@ -275,7 +275,25 @@ kompile-cls (clause tel ps t ∷ []) ctx ret =
   return $ as ⊕ "\n"
          ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
-kompile-cls (absurd-clause tel ps ∷ cs) ctx ret = kc "TODO₂"
+kompile-cls (absurd-clause tel ps ∷ []) ctx ret =
+  -- Exactly the same as above
+  -- We don't really need to make this call, but we keep it
+  -- for sanity checks.  I.e. if we'll get an error in the
+  -- patterns, it will bubble up to the caller.
+  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  return $ ok "unreachable ();"
+
+kompile-cls (absurd-clause tel ps ∷ ts@(_ ∷ _)) ctx ret =
+  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  let (mk vars _ conds _) = pst
+      cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
+  r ← kompile-cls ts ctx ret
+  return $ "if (" ⊕ cs ⊕ ") {\n"
+         ⊕ "unreachable();\n"
+         ⊕ "} else {\n"
+         ⊕ r ⊕ "\n"
+         ⊕ "}\n"
+
 kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
   kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns conds _) = pst
@@ -375,6 +393,13 @@ kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
 kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
   -- For now we just skip dot patterns.
   kompile-clpats tel l vars pst
+
+kompile-clpats tel (arg i absurd ∷ l) (v ∷ ctx) pst =
+  -- If have met the absurd pattern, we are done, as
+  -- we have accumulated enough conditions to derive
+  -- impossibility.  So we are simply done.
+  ok pst
+
 
 kompile-clpats _ [] [] pst = ok pst
 kompile-clpats tel ps ctx patst = error $ "kompile-clpats failed, pattern: ["
