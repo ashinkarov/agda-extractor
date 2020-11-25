@@ -180,8 +180,10 @@ module absurd-patterns where
   test₁₇ : kompile test-16f [] []  ≡ ok _
   test₁₇ = refl
 
+-- Dot patterns
+test-18f : ∀ m n → m ≡ n → Fin (suc m)
+test-18f zero    .zero    refl = zero
+test-18f (suc m) .(suc m) refl = suc (test-18f m m refl)
 
-
-
--- TODO tests
--- test for dot patterns
+test₁₈ : kompile test-18f [] []  ≡ ok _
+test₁₈ = refl
