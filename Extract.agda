@@ -1,5 +1,6 @@
 open import Structures
 open import Reflection hiding (return; _>>=_; _>>_)
+open import Reflection.Show
 
 module Extract (kompile-fun : Type → Term → Name → SKS Prog) where
 
@@ -50,6 +51,17 @@ macro
      q ← quoteTC te
      unify a q
 
+  -- For debugging purposes.
+  ftest : Name → Term → TC ⊤
+  ftest f a = do
+     (function (c1@(clause tel₁ ps₁ t₁) ∷ c2@(clause tel₂ ps₂ t₂) ∷ [])) ← {- withReconstructed $ -} getDefinition f where
+           _ → quoteTC "ERROR" >>= unify a
+     --te ← pat-lam-norm te base-funs
+     t₂ ← inContext (reverse $ L.map proj₂ tel₂) $ normalise t₂
+     typeError (strErr "xxx" ∷ strErr (showTerm t₂) ∷ []) --(strErr "t₂ is: " ∷ showTerm t₂ ∷ [])
+
+     --q ← quoteTC t₂ -- (pat-lam (c1 ∷ clause tel₂ ps₂ t₂ ∷ []) ∷ [])
+     --unify a q
 
 -- This function normalises inside of the clauses of the
 -- function.  The main usecase is to push the rewriting
@@ -98,14 +110,18 @@ kompile-fold = do
                     _ → return unknown
               te ← pat-lam-norm te ba
               return $ ty , te
-          R.put (ks fs ba (f ∷ done) c)
-          -- Compile the function and make an error more specific in
-          -- case compilation fails.
-          q ← lift-mstate {RM = monadTC} $ kompile-fun ty te f
-          let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
-          -- Do the rest of the functions
-          p ← kompile-fold
-          return $ p ⊕ "\n\n" ⊕ q
+          case te of λ where
+            unknown →
+              return $ error $ "kompile: attempting to compile `" ++ showName f ++ "` as function"
+            _ → do
+                R.put (ks fs ba (f ∷ done) c)
+                -- Compile the function and make an error more specific in
+                -- case compilation fails.
+                q ← lift-mstate {RM = monadTC} $ kompile-fun ty te f
+                let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
+                -- Do the rest of the functions
+                p ← kompile-fold
+                return $ p ⊕ "\n\n" ⊕ q
   where
     module R = RawMonadState (StateTMonadState KS monadTC)
 

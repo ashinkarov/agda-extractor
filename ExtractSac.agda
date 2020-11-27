@@ -1,15 +1,17 @@
 open import Structures
+open import SacTy
 
 module ExtractSac where
-open import Data.String as S hiding (_++_) --using (String)
-open import Data.List as L hiding (_++_)  --using (List; []; _∷_; [_])
+open import Data.String as S hiding (_++_)
+open import Data.List as L hiding (_++_)
 open import Data.List.Categorical
 open import Data.Nat as N
 open import Data.Nat.Properties as N
-open import Data.Nat.Show renaming (show to showNat) -- FIXME instances?
+open import Data.Nat.Show renaming (show to showNat)
 open import Data.Product hiding (map)
+open import Data.Sum hiding (map)
 open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
-open import Data.Vec as V using (Vec; [] ; _∷_) -- ; updateAt)
+open import Data.Vec as V using (Vec; [] ; _∷_)
 open import Data.Char renaming (_≈?_ to _c≈?_)
 open import Data.Bool
 open import Data.Fin as F using (Fin; zero; suc; inject₁)
@@ -26,13 +28,17 @@ open import Reflection.Term
 
 open import Function
 
-open RawMonad {{...}}
+open import Array.Base
+open import Array.Properties
+
+open RawMonad ⦃ ... ⦄
+
 
 -- Glorified sigma type for variable-type pairs
 record VarTy : Set where
   constructor _∈_
   field v : String
-        t : String
+        t : Err SacTy
 
 -- Glorified sigma type for variable-assertion pairs
 record Assrt : Set where
@@ -96,7 +102,7 @@ SPS = State PS
 
 -- The main function kit to extract sac functions.
 kompile-fun    : Type → Term → Name → SKS Prog
-kompile-pi     : Type → SPS Prog
+kompile-pi     : Type → SPS (Err SacTy) --Prog
 kompile-cls    : Clauses → (vars : Strings) → (ret : String) → SKS Prog
 kompile-clpats : Telescope → (pats : List $ Arg Pattern) → (vars : Strings) → PatSt → Err PatSt
 {-# TERMINATING #-}
@@ -126,6 +132,14 @@ private
   kf : String → Prog
   kf x = error $ "kompile-fun: " ++ x
 
+  validate-ty : Err SacTy → Prog
+  validate-ty (error x) = error x
+  validate-ty (ok τ) = let τ′ = sacty-normalise τ in
+                       case nested? τ′ of λ where
+                         hom → ok $ sacty-to-string τ′
+                         nes → error $ "sac does not support nested types, but `"
+                                    ++ sacty-to-string τ′ ++ "` found"
+
   module R = RawMonadState (StateMonadState KS)
 
 kompile-fun ty (pat-lam [] []) n =
@@ -133,16 +147,17 @@ kompile-fun ty (pat-lam [] []) n =
 kompile-fun ty (pat-lam cs []) n = do
   kst ← R.get
   let (rt , ps) = kompile-pi ty $ record defaultPS{ kst = kst }
+      rt = validate-ty rt
       rv = PS.ret ps
       ns = showName n
-      args = ", " ++/ L.map (λ where (v ∈ t) → t ++ " " ++ v) (PS.ctx ps)
+      args = ok ", " ++/ L.map (λ where (v ∈ t) → validate-ty t ⊕ " " ⊕ v) (PS.ctx ps)
       ret-assrts = list-filter (λ where (mk v _) → v ≈? rv) $ PS.assrts ps
       arg-assrts = list-filter (dec-neg λ where (mk v _) → v ≈? rv) $ PS.assrts ps
       assrt-to-code = ("/* " ++_) ∘ (_++ " */") ∘ Assrt.a
   R.put $ PS.kst ps
   b ← kompile-cls cs (L.map (λ where (v ∈ _) → v) $ PS.ctx ps) rv
   return $ "// Function " ⊕ ns ⊕ "\n"
-         ⊕ rt ⊕ "\n"
+         ⊕ rt ⊕ "\n" 
          ⊕ nnorm ns ⊕ "(" ⊕ args ⊕ ") {\n"
          ⊕ "\n" ++/ L.map assrt-to-code arg-assrts
          ⊕ rt ⊕ " " ⊕ rv ⊕ ";\n"
@@ -156,8 +171,11 @@ kompile-fun _ _ _ =
 
 
 private
-  kp : String → SPS Prog
+  kp : ∀ {X} → String → SPS (Err X)
   kp x = return $ error $ "kompile-pi: " ++ x
+
+  ke : ∀ {X} → String → SPS (Err X)
+  ke x = return $ error x
 
   module P = RawMonadState (StateMonadState PS)
 
@@ -183,7 +201,7 @@ private
     lift-ks $ kompile-term t (L.map (λ where (v ∈ _) → v) $ PS.ctx ps)
 
 
-kompile-ty : Type → (pi-ok : Bool) → SPS Prog
+kompile-ty : Type → (pi-ok : Bool) → SPS (Err SacTy)
 kompile-ty (Π[ s ∶ arg i x ] y) false = kp "higher-order functions are not supported"
 kompile-ty (Π[ s ∶ arg i x ] y) true  = do
     v ← ps-fresh "x_"
@@ -191,56 +209,57 @@ kompile-ty (Π[ s ∶ arg i x ] y) true  = do
     (ok t) ← kompile-ty x false
       where e → return e
     P.modify λ k → record k { cur = PS.ret k  -- In case this is a return type
-                            ; ctx = PS.ctx k ++ [ v ∈ t ] }
+                            ; ctx = PS.ctx k ++ [ v ∈ ok t ] }
     kompile-ty y true
 
 kompile-ty (con c args) pi-ok =
   kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
-kompile-ty (def (quote ℕ) args) _ = return $ ok "int"
-kompile-ty (def (quote Bool) args) _ = return $ ok "bool"
+kompile-ty (def (quote ℕ) args) _ = return $ ok int
+kompile-ty (def (quote Bool) args) _ = return $ ok bool
 kompile-ty (def (quote Fin) (arg _ x ∷ [])) _ = do
-  (ok p) ← sps-kompile-term x where e → return e
+  ok p ← sps-kompile-term x where error x → ke x
   v ← PS.cur <$> P.get
   P.modify $ _p+=a (mk v $′ "assert (" ++ v ++ " < " ++ p ++ ")")
-  return $ ok "int"
+  return $ ok int
 
 kompile-ty (def (quote L.List) (_ ∷ arg _ ty ∷ _)) _ = do
   el ← ps-fresh "el_"
-  (v , as) ← < PS.cur , PS.assrts > <$> P.get
+  v , as ← < PS.cur , PS.assrts > <$> P.get
   -- Any constraints that the subsequent call would
   -- generate will be constraints about the elements
   -- of the list.
   P.modify λ k → record k { cur = el ; assrts = [] }
-  -- TODO: we are now assuming that nested arrays are ok
-  --       which is not quite true (at least not with this syntax)
-  τ ← kompile-ty ty false
+  ok τ ← kompile-ty ty false where e → return e
   P.modify λ k → record k {
     cur = v;
     assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
     -- No need to modify context, as we don't allow higher order functions, so it stays the same.
     }
-  return $ τ ⊕ "[.]"
+  return $ ok $ akd nes τ (error "lists do not have static shape") 1
 
 kompile-ty (def (quote V.Vec) (_ ∷ arg _ ty ∷ arg _ n ∷ [])) _ = do
   el ← ps-fresh "el_"
-  (v , as) ← < PS.cur , PS.assrts > <$> P.get
-  (ok p) ← sps-kompile-term n where e → return e
+  v , as ← < PS.cur , PS.assrts > <$> P.get
+  ok p ← sps-kompile-term n where error x → ke x
   P.modify λ k → record k { cur = el ; assrts = [] }
-  -- TODO: Nested vectors can be represented as normal multi-dimensional arrays.
-  τ ← kompile-ty ty false
+  ok τ ← kompile-ty ty false where e → return e
   P.modify λ k → record k {
     cur = v;
     assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
                 ++ [ mk v $′ "assert (shape (" ++ v ++ ")[[0]] == " ++ p ++ ")" ]
     }
-  return $ τ ⊕ "[.]"
+  let sh = "[" ⊕ p ⊕ "]"
+  case n of λ where
+    -- XXX can we possibly miss on any constant expressions?
+    (lit (nat n′)) → return $ ok $ aks hom τ sh 1 V.[ n′ ]
+    _              → return $ ok $ akd hom τ sh 1
 
 kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
-  (ok x) ← sps-kompile-term x where e → return e
-  (ok y) ← sps-kompile-term y where e → return e
+  ok x ← sps-kompile-term x where error x → ke x
+  ok y ← sps-kompile-term y where error x → ke x
   v ← PS.cur <$> P.get
-  P.modify (_p+=a (mk v $′ "assert (" ++ x ++ " == " ++ y ++ ")"))
-  return $ ok "unit"
+  P.modify $ _p+=a (mk v $′ "assert (" ++ x ++ " == " ++ y ++ ")")
+  return $ ok unit
 
 kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
 
@@ -466,15 +485,31 @@ kompile-term (con (quote Fin.suc) args) vars = do
   args ← kompile-arglist 2 args [ # 1 ] vars
   return $ "(1 + " ⊕ args ⊕ ")"
 
-kompile-term (con (quote L.List.[]) _) _ =
-  return $ ok "[]"
+kompile-term (con (quote L.List.[]) (_ ∷ (arg _ ty) ∷ [])) vars = do
+  -- We want to call kompile-ty, and we need a context that "should"
+  -- contain vars with their types.  But, we never actually access these
+  -- types in the context, we only refer to variables, therefore the
+  -- following hack is justified.
+  kst ← R.get
+  let ctx = L.map (λ v → v ∈ error "?") vars
+      (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
+      in-sh = sacty-shape =<< rt
+  --R.put (PS.kst ps)
+  return $ "empty (" ⊕ in-sh ⊕ ")" --ok "[]"
+
 kompile-term (con (quote L.List._∷_) args) vars = do
   args ← kompile-arglist 4 args (# 2 ∷ # 3 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
 
 -- Almost the same as List
-kompile-term (con (quote V.Vec.[]) _) _ =
-  return $ ok "[]"
+kompile-term (con (quote V.Vec.[]) (_ ∷ (arg _ ty) ∷ [])) vars = do
+  kst ← R.get
+  let ctx = L.map (λ v → v ∈ error "?") vars
+      (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
+      in-sh = sacty-shape =<< rt
+  --R.put (PS.kst ps)
+  return $ "empty (" ⊕ in-sh ⊕ ")" --ok "[]"
+
 kompile-term (con (quote V.Vec._∷_) args) vars = do
   args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
@@ -491,7 +526,10 @@ kompile-term (def (quote N._*_) args) vars =
   ("_mul_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
 
 -- The last pattern in the list of `def` matches
-kompile-term (def n args) vars = do
+kompile-term (def n []) _ =
+  kt $ "attempting to compile `" ++ showName n ++ "` as function with 0 arguments"
+
+kompile-term (def n args@(_ ∷ _)) vars = do
   R.modify λ k → record k { funs = KS.funs k ++ [ n ]  }
   let n = nnorm $ showName n
       l = L.length args

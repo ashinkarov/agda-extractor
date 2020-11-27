@@ -58,6 +58,8 @@ inline int    dim (int[*] a) { return _dim_A_ (a); }
 // Scalar-vector take/drop
 inline int[.] take (int a, int[.] b) { return _take_SxV_ (a,b); }
 inline int[.] drop (int a, int[.] b) { return _drop_SxV_ (a,b); }
+inline int[.] ++(int[.] a, int[.] b) { return _cat_VxV_ (a,b); }
+
 
 // Increment
 inline int ++ (int a) { return _add_SxS_ (a, 1); }
@@ -84,21 +86,62 @@ inline int[.] / (int[.] a, int[.] b) { return _div_VxV_ (a, b); }
 inline int[*] reshape (int[.] a, int[*] b) { return _reshape_VxA_(a,b); }
 inline bool[*] reshape (int[.] a, bool[*] b) { return _reshape_VxA_(a,b); }
 
-// Vector stuff
-inline int[.] cons (int x, int[.] xs) {
+// Vector stuff.
+// We assume that vector is a multi-dimensional array with at
+// leat one dimension.  In this case, if we rewrite its type
+// in the nested fashion:
+//
+//      T[a,b,c] -> (T[b,c])[a]
+//
+// we will get the following operations:
+//
+//      hd : (T[b,c])[a] -> T[b,c]        | a > 0
+//      tl : (T[b,c])[a] -> (T[b,c])[a-1] | a > 0
+//      cons : (T[b,c], (T[b,c])[a]) -> (T[b,c])[a]
+//
+// As we don't support such syntax, we have to emulate it
+// via nested with-loops:
+int[*] hd (int[+] xs) {
+  sxs = shape(xs);
   return with {
-            ([0] <= iv <= [0]): x;
-            ([1] <= iv <= .): xs[iv - 1];
-         }: genarray (1 + shape (xs));
+            (. <= iv <= .) : _sel_VxA_ ([0]++iv, xs);
+         }: genarray(drop(1, sxs), 0);
 }
-inline int hd (int[.] xs) { return xs[0]; }
-inline int[.] tl (int[.] xs) { 
-   return with {
-           (. <= iv <= .): xs[iv+1];
-          }: genarray (shape (xs) - 1); }
-inline bool emptyvec_p (int[.] xs) { return shape(xs)[0] == 0; }
-inline bool nonemptyvec_p (int[.] xs) { return shape(xs)[0] != 0; }
-inline int len (int[.] xs) { return shape(xs)[0]; }
+
+int[+] tl (int[+] xs) {
+  sxs = shape(xs);
+  rs = [_sel_VxA_ ([0], sxs) - 1];
+  return with {
+            (. <= [i] <= .) : with {
+               (. <= jv <= .) : _sel_VxA_ ([i+1] ++ jv, xs);
+            }: genarray(drop(1,sxs), 0);
+         }: genarray(rs, with{}:genarray(drop(1,sxs),0));
+}
+
+int[+] cons (int[*] x, int[+] xs) {
+  sxs = shape(xs);
+  sxs0 = _sel_VxA_ ([0], sxs);
+  return with {
+            ([0] <= iv  < [1]): x;
+            ([1] <= [i] < [sxs0+1]): with {
+               (. <= jv <= .): _sel_VxA_ ([i-1]++jv, xs);
+            }: genarray(drop(1, sxs), 0);
+         }: genarray([sxs0+1], with{}:genarray(drop(1, sxs), 0));
+}
+
+bool emptyvec_p (int[+] x) {
+  return _sel_VxA_ ([0], shape(x)) == 0;
+}
+
+bool nonemptyvec_p (int[+] x) {
+  return _sel_VxA_ ([0], shape(x)) != 0;
+}
+
+// Empty vector is now parametrised on the rank of the inner element.
+int[*] empty(int[.] sh) {
+  return with{}:genarray(_cat_VxV_ ([0], sh), 0);
+}
+
 
 // Integer utilities
 inline int[.] iota (int a)
