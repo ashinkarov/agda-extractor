@@ -111,10 +111,10 @@ bt-tostring char = "char"
 postfix-aud = "[*]"
 
 postfix-akd : ℕ → String
-postfix-akd n = "[" ++ (", " ++/ L.replicate n ".") ++ "]"
+postfix-akd n = "[" ++ ("," ++/ L.replicate n ".") ++ "]"
 
 postfix-aks : (n : ℕ) → Vec ℕ n → String
-postfix-aks n s = "[" ++ (", " ++/ L.map showNat (V.toList s)) ++ "]"
+postfix-aks n s = "[" ++ ("," ++/ L.map showNat (V.toList s)) ++ "]"
 
 bt : SacTy → String
 bt τ = bt-tostring (proj₂ $ get-base τ)

@@ -3,6 +3,7 @@ open import Data.List using (List; []; _∷_)
 open import Data.Nat using (ℕ)
 open import Data.Product
 open import Data.Bool
+open import Data.Maybe
 
 open import Reflection using (TC)
 open import Reflection.Name using (Names)
@@ -138,6 +139,20 @@ list-has-el P? [] = false
 list-has-el P? (x ∷ xs) with P? x
 ... | yes _ = true
 ... | no  _ = list-has-el P? xs
+
+-- Check if there exists an element in the list that satisfies the predicate P.
+list-find-el : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → Maybe A
+list-find-el P? [] = nothing
+list-find-el P? (x ∷ xs) with P? x
+... | yes _ = just x
+... | no  _ = list-find-el P? xs
+
+list-update-fst : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → (A → A) → List A
+list-update-fst P? [] f = []
+list-update-fst P? (x ∷ xs) f with P? x
+... | yes _ = f x ∷ xs
+... | no  _ = x ∷ list-update-fst P? xs f
+
 
 list-filter : ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → List A → List A
 list-filter P? [] = []

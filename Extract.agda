@@ -51,18 +51,6 @@ macro
      q ← quoteTC te
      unify a q
 
-  -- For debugging purposes.
-  ftest : Name → Term → TC ⊤
-  ftest f a = do
-     (function (c1@(clause tel₁ ps₁ t₁) ∷ c2@(clause tel₂ ps₂ t₂) ∷ [])) ← {- withReconstructed $ -} getDefinition f where
-           _ → quoteTC "ERROR" >>= unify a
-     --te ← pat-lam-norm te base-funs
-     t₂ ← inContext (reverse $ L.map proj₂ tel₂) $ normalise t₂
-     typeError (strErr "xxx" ∷ strErr (showTerm t₂) ∷ []) --(strErr "t₂ is: " ∷ showTerm t₂ ∷ [])
-
-     --q ← quoteTC t₂ -- (pat-lam (c1 ∷ clause tel₂ ps₂ t₂ ∷ []) ∷ [])
-     --unify a q
-
 -- This function normalises inside of the clauses of the
 -- function.  The main usecase is to push the rewriting
 -- rules in the body of the function prior to extraction.

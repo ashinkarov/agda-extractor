@@ -2,19 +2,20 @@ open import Structures
 open import SacTy
 
 module ExtractSac where
-open import Data.String as S hiding (_++_)
+open import Data.String as S hiding (_++_) renaming (_≟_ to _≟s_)
 open import Data.List as L hiding (_++_)
 open import Data.List.Categorical
 open import Data.Nat as N
 open import Data.Nat.Properties as N
 open import Data.Nat.Show renaming (show to showNat)
-open import Data.Product hiding (map)
+open import Data.Product as Σ hiding (map)
 open import Data.Sum hiding (map)
 open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
 open import Data.Vec as V using (Vec; [] ; _∷_)
 open import Data.Char renaming (_≈?_ to _c≈?_)
 open import Data.Bool
 open import Data.Fin as F using (Fin; zero; suc; inject₁)
+open import Data.Maybe using (Maybe; just; nothing)
 
 open import Category.Monad
 open import Category.Monad.State
@@ -263,17 +264,28 @@ kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _
 
 kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
 
-kompile-ty unknown _ =
-  kp "found unknown in type"
-kompile-ty (meta _ _) _ =
-  kp  "found meta in type"
-kompile-ty (pat-lam _ _) _ =
-  kp "found pattern-matching lambda in type"
-kompile-ty _ _ =
-  kp "ERROR"
+kompile-ty t _ =
+  kp $ "failed with the term `" ++ showTerm t ++ "`"
 
 
 kompile-pi x = kompile-ty x true
+
+
+
+
+-- The names in the telescopes very oftern are not unique, which
+-- would be pretty disasterous if the code generation relies on them.
+-- see https://github.com/agda/agda/issues/5048 for more details.
+--
+-- This function simply ensures that variable names are unique in
+-- in the telescope.
+tel-rename : Telescope → (db : List (String × ℕ)) → Telescope
+tel-rename [] db = []
+tel-rename ((v , ty) ∷ tel) db with list-find-el ((_≟s v) ∘ proj₁) db
+... | just (_ , n) = (v ++ "_" ++ showNat n , ty)
+                     ∷ tel-rename tel (list-update-fst ((_≟s v) ∘ proj₁) db (Σ.map₂ suc))
+... | nothing      = (v , ty)
+                     ∷ tel-rename tel ((v , 1) ∷ db)
 
 
 private
@@ -287,7 +299,7 @@ private
 
 kompile-cls [] ctx ret = kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
-  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns _ _) = pst
   t ← kompile-term t vars
   let as = "\n" ++/ assgns
@@ -299,11 +311,11 @@ kompile-cls (absurd-clause tel ps ∷ []) ctx ret =
   -- We don't really need to make this call, but we keep it
   -- for sanity checks.  I.e. if we'll get an error in the
   -- patterns, it will bubble up to the caller.
-  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
   return $ ok "unreachable ();"
 
 kompile-cls (absurd-clause tel ps ∷ ts@(_ ∷ _)) ctx ret =
-  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars _ conds _) = pst
       cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
   r ← kompile-cls ts ctx ret
@@ -314,7 +326,7 @@ kompile-cls (absurd-clause tel ps ∷ ts@(_ ∷ _)) ctx ret =
          ⊕ "}\n"
 
 kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
-  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns conds _) = pst
       cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
       as = "\n" ++/ assgns
