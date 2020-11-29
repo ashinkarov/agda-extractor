@@ -51,6 +51,13 @@ macro
      q ← quoteTC te
      unify a q
 
+  fty : Name → List Name → Term → TC ⊤
+  fty f base-funs a = do
+     ty ← getType f
+     ty ← withReconstructed $ dontReduceDefs base-funs $ normalise ty
+     q ← quoteTC ty
+     unify a q
+
 -- This function normalises inside of the clauses of the
 -- function.  The main usecase is to push the rewriting
 -- rules in the body of the function prior to extraction.

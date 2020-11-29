@@ -22,9 +22,9 @@ open import Function
 test1-f : ℕ → ℕ
 test1-f x = 1 + x
 
-test₁ : kompile test1-f [] [] ≡ (ok $ "\n\n// Function Example.test1-f\n"
+test₁ : kompile test1-f [] [] ≡ (ok $ "\n\n// Function Example-00.test1-f\n"
                                    ++ "int\n"
-                                   ++ "Example_test1_f(int x_1) {\n"
+                                   ++ "Example_00_test1_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = (1 + x);\n"
@@ -36,9 +36,9 @@ test₁ = refl
 test2-f : ℕ → ℕ
 test2-f x = 0
 
-test₂ : kompile test2-f [] [] ≡ (ok $ "\n\n// Function Example.test2-f\n"
+test₂ : kompile test2-f [] [] ≡ (ok $ "\n\n// Function Example-00.test2-f\n"
                                    ++ "int\n"
-                                   ++ "Example_test2_f(int x_1) {\n"
+                                   ++ "Example_00_test2_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = 0;\n"
@@ -51,9 +51,9 @@ test₂ = refl
 test3-f : ℕ → ℕ
 test3-f x = x + 0
 
-test₃ : kompile test3-f [] [] ≡ (ok $ "\n\n// Function Example.test3-f\n"
+test₃ : kompile test3-f [] [] ≡ (ok $ "\n\n// Function Example-00.test3-f\n"
                                    ++ "int\n"
-                                   ++ "Example_test3_f(int x_1) {\n"
+                                   ++ "Example_00_test3_f(int x_1) {\n"
                                    ++ "int __ret;\n"
                                    ++ "x = x_1;\n"
                                    ++ "__ret = x;\n"
@@ -93,7 +93,7 @@ module _ where
 test-7f : (a b c : ℕ) → ℕ
 test-7f a b c = c
 
-test₇ : kompile test-7f [] [] ≡ (ok $ "\n\n// Function Example.test-7f\nint\nExample_test_7f(int x_1, int x_2, int x_3) {\n"
+test₇ : kompile test-7f [] [] ≡ (ok $ "\n\n// Function Example-00.test-7f\nint\nExample_00_test_7f(int x_1, int x_2, int x_3) {\n"
                                    ++ "int __ret;\na = x_1;\nb = x_2;\nc = x_3;\n__ret = c;\nreturn __ret;\n}\n\n")
 test₇ = refl
 

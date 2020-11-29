@@ -13,6 +13,8 @@ open import Reflection
 open import Structures
 open import Function
 
+open import Array.Base
+
 -- Check that Vec² and List ∘ Vec are treated correctly.
 -- Here we transpose a 2d array using Vec operations.
 -- Note that we are using local where-defined functions.
@@ -63,3 +65,17 @@ test-24f = 1 ∷ 2 ∷ 3 ∷ []
 
 test₂₄ : kompile test-24f [] [] ≡ ok _
 test₂₄ = refl
+
+-- Array stuff
+test-25f : ℕ → Ar ℕ 1 V.[ 5 ]
+test-25f n = cst n
+
+test₂₅ : kompile test-25f [] [] ≡ ok _
+test₂₅ = refl
+
+-- Element-wise addition.
+test-26f : ∀ {d s} → (a b : Ar ℕ d s) → Ar ℕ d s
+test-26f a b = imap λ iv → sel a iv + sel b iv
+
+test₂₆ : kompile test-26f [] [] ≡ ok _
+test₂₆ = refl

@@ -187,3 +187,7 @@ inline bool[*] genarray (int[.] shp, bool b)
     return with {}: genarray (shp, b);
 }
 
+
+inline int[*] zero(int[.] sh) {
+  return genarray (sh, 0);
+}

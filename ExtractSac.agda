@@ -233,7 +233,7 @@ kompile-ty (def (quote L.List) (_ ∷ arg _ ty ∷ _)) _ = do
   ok τ ← kompile-ty ty false where e → return e
   P.modify λ k → record k {
     cur = v;
-    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
+    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach-v " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
     -- No need to modify context, as we don't allow higher order functions, so it stays the same.
     }
   return $ ok $ akd nes τ (error "lists do not have static shape") 1
@@ -246,7 +246,7 @@ kompile-ty (def (quote V.Vec) (_ ∷ arg _ ty ∷ arg _ n ∷ [])) _ = do
   ok τ ← kompile-ty ty false where e → return e
   P.modify λ k → record k {
     cur = v;
-    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
+    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach-v " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
                 ++ [ mk v $′ "assert (shape (" ++ v ++ ")[[0]] == " ++ p ++ ")" ]
     }
   let sh = "[" ⊕ p ⊕ "]"
@@ -254,6 +254,26 @@ kompile-ty (def (quote V.Vec) (_ ∷ arg _ ty ∷ arg _ n ∷ [])) _ = do
     -- XXX can we possibly miss on any constant expressions?
     (lit (nat n′)) → return $ ok $ aks hom τ sh 1 V.[ n′ ]
     _              → return $ ok $ akd hom τ sh 1
+
+
+kompile-ty (def (quote Ar) (_ ∷ arg _ el-ty ∷ arg _ dim ∷ arg _ sh ∷ [])) _ = do
+  el ← ps-fresh "el_"
+  v , as ← < PS.cur , PS.assrts > <$> P.get
+  ok d ← sps-kompile-term dim where error x → ke x
+  ok s ← sps-kompile-term sh where error x → ke x
+  P.modify λ k → record k { cur = el ; assrts = [] }
+  ok τ ← kompile-ty el-ty false where e → return e
+  P.modify λ k → record k {
+    cur = v;
+    assrts = as ++ (L.map {B = Assrt} (λ where (mk _ a) → mk v ("foreach-a sh=" ++ s ++ " " ++ el ++ " in " ++ v ++ ": " ++ a)) $ PS.assrts k)
+                ++ [ mk v $′ "assert (take (" ++ d ++ ", shape (" ++ v ++ ")) == " ++ s ++ ")" ]
+                -- XXX do we want to assert stuff about rank?
+    }
+  case dim of λ where
+    -- XXX can we possibly miss on any constant expressions?
+                     -- FIXME consider AKS case here!
+    (lit (nat d′)) → return $ ok $ akd hom τ (ok s) d′
+    _ → return $ ok $ aud hom τ (ok s)
 
 kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
   ok x ← sps-kompile-term x where error x → ke x
@@ -425,7 +445,7 @@ kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
   -- For now we just skip dot patterns.
   kompile-clpats tel l vars pst
 
-kompile-clpats tel (arg i absurd ∷ l) (v ∷ ctx) pst =
+kompile-clpats tel (arg i (absurd _) ∷ l) (v ∷ ctx) pst =
   -- If have met the absurd pattern, we are done, as
   -- we have accumulated enough conditions to derive
   -- impossibility.  So we are simply done.
@@ -442,6 +462,12 @@ kompile-clpats tel ps ctx patst = error $ "kompile-clpats failed, pattern: ["
 private
   kt : String → SKS Prog
   kt x = return $ error $ "kompile-term: " ++ x
+
+  kt-fresh : String → SKS String
+  kt-fresh x = do
+    ps ← R.get
+    R.modify λ k → record k{ cnt = 1 + KS.cnt k }
+    return $ x ++ showNat (KS.cnt ps)
 
 var-lookup : Strings → ℕ → SKS Prog
 var-lookup []       _       = kt "Variable lookup failed"
@@ -529,6 +555,32 @@ kompile-term (con (quote V.Vec._∷_) args) vars = do
 kompile-term (con (quote refl) _) _ =
   return $ ok "tt"
 
+
+-- Imaps with explicit lambdas
+kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ arg _ (vLam x e) ∷ [])) vars = do
+  kst ← R.get
+  let ctx = L.map (λ v → v ∈ error "?") vars
+      (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
+      in-sh = sacty-shape =<< rt
+  --R.put (PS.kst ps)
+  iv ← kt-fresh "iv_"
+  s ← kompile-term s vars
+  b ← kompile-term e $ vars ++ [ iv ]
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray (" ⊕ s ⊕ ", zero (" ⊕ in-sh ⊕ "))"
+
+-- Imaps with an expression
+kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ arg _ e ∷ [])) vars = do
+  kst ← R.get
+  let ctx = L.map (λ v → v ∈ error "?") vars
+      (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
+      in-sh = sacty-shape =<< rt
+  --R.put (PS.kst ps)
+  iv ← kt-fresh "iv_"
+  s ← kompile-term s vars
+  b ← kompile-term e $ vars
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ " (" ⊕ iv ⊕ "); }: genarray (" ⊕ s ⊕ ", zero (" ⊕ in-sh ⊕ "))"
+
+
 kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
 
 
@@ -537,12 +589,18 @@ kompile-term (def (quote N._+_) args) vars =
 kompile-term (def (quote N._*_) args) vars =
   ("_mul_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
 
+-- Array stuff
+kompile-term (def (quote sel) (_ ∷ _ ∷ _ ∷ _ ∷ arg _ a ∷ arg _ iv ∷ [])) vars = do
+  a ← kompile-term a vars
+  iv ← kompile-term iv vars
+  return $ a ⊕ "[" ⊕ iv ⊕ "]"
+
 -- The last pattern in the list of `def` matches
 kompile-term (def n []) _ =
   kt $ "attempting to compile `" ++ showName n ++ "` as function with 0 arguments"
 
 kompile-term (def n args@(_ ∷ _)) vars = do
-  R.modify λ k → record k { funs = KS.funs k ++ [ n ]  }
+  R.modify λ k → record k { funs = KS.funs k ++ [ n ] }
   let n = nnorm $ showName n
       l = L.length args
   args ← kompile-arglist l args (mk-mask l) vars
