@@ -101,6 +101,17 @@ test-29f (imap .a) (imap a) refl = imap λ iv → a iv + 1
 --
 -- even though `f` has type Ix 1 [1] → ⊥, which doesn't exist.
 
+-- If non-lambda is found as an argument of the imap.
+test-31f : Ar ℕ 1 V.[ 10 ] → Ar ℕ 1 V.[ 10 ]
+test-31f (imap f) = imap f
+
+
+-- Index types
+test-32f : Ix 2 (3 ∷ 4 ∷ []) → Fin 3
+test-32f ix = ix-lookup ix (# 0)
+
+
+
 module mat-mul where
   postulate
     asum : ∀ {n} → Ar ℕ 1 (n ∷ []) → ℕ
@@ -114,3 +125,9 @@ module mat-mul where
                                     in asum (imap λ kv → let k = ix-lookup kv (# 0)
                                                           in a (i ∷ k ∷ []) * b (k ∷ j ∷ []))
 
+  test₃₃ : kompile mm [] (quote asum ∷ []) ≡ ok _
+  test₃₃ = refl
+
+test-34f : ∀ {d s} → Ix (d + d) s → ℕ
+test-34f {0} [] =  1
+test-34f {suc _} (_∷_ {d}{s}{x} i ix) =  x

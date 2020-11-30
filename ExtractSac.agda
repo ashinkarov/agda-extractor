@@ -275,6 +275,19 @@ kompile-ty (def (quote Ar) (_ ∷ arg _ el-ty ∷ arg _ dim ∷ arg _ sh ∷ [])
     (lit (nat d′)) → return $ ok $ akd hom τ (ok s) d′
     _ → return $ ok $ aud hom τ (ok s)
 
+
+kompile-ty (def (quote Ix) (arg _ dim ∷ arg _ s ∷ [])) _ = do
+  v ← PS.cur <$> P.get
+  ok d ← sps-kompile-term dim where error x → ke x
+  ok s ← sps-kompile-term s where error x → ke x
+  P.modify $ _p+=a (mk v $′ "assert (dim (" ++ v ++ ") == " ++ d ++ ")")
+           ∘ _p+=a (mk v $′ "assert (" ++ v ++ " < " ++ s ++ ")")
+
+  case dim of λ where
+    (lit (nat d′)) → return $ ok $ aks hom int (ok s) 1 V.[ d′ ]
+    _              → return $ ok $ akd hom int (ok s) 1
+
+
 kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
   ok x ← sps-kompile-term x where error x → ke x
   ok y ← sps-kompile-term y where error x → ke x
@@ -420,6 +433,17 @@ kompile-clpats tel (arg i (con (quote V.Vec.[]) []) ∷ l) (v ∷ ctx) pst =
 kompile-clpats tel (arg i (con (quote V.Vec._∷_) ps@(_ ∷ _ ∷ _ ∷ [])) ∷ l) (v ∷ ctx) pst =
   kompile-clpats tel (ps ++ l) (("len (" ++ v ++ ") - 1") ∷ ("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
                  $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
+
+-- Patterns for Ix constructors
+kompile-clpats tel (arg i (con (quote Ix.[]) []) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel l ctx $ pst +=c ("emptyvec_p (" ++ v ++ ")")
+
+kompile-clpats tel (arg i (con (quote Ix._∷_) ps@(d ∷ arg _ (dot s) ∷ arg _ (dot x) ∷ finx ∷ tailix ∷ [])) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (d ∷ finx ∷ tailix ∷ l) (("len (" ++ v ++ ") - 1") ∷ ("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
+                 $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
+kompile-clpats tel (arg i (con (quote Ix._∷_) _) ∷ l) (v ∷ ctx) pst =
+  kcp $ "matching on `s` and `x` in the Ix._∷_ is not supported, please rewrite the pattern"
+
 
 kompile-clpats tel (arg i (con (quote imap) (arg _ (var _) ∷ [])) ∷ l) (v ∷ ctx) pst = do
   (ub , pst) ← pst-fresh pst $ "IMAP_" ++ v ++ "_"
@@ -576,6 +600,16 @@ kompile-term (con (quote V.Vec._∷_) args) vars = do
   args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
 
+
+-- Ix constructors
+kompile-term (con (quote Ix.[]) []) vars =
+  return $ ok "[]"
+
+kompile-term (con (quote Ix._∷_) args) vars = do
+  args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
+  return $ "cons (" ⊕ args ⊕ ")"
+
+
 kompile-term (con (quote refl) _) _ =
   return $ ok "tt"
 
@@ -618,6 +652,12 @@ kompile-term (def (quote sel) (_ ∷ _ ∷ _ ∷ _ ∷ arg _ a ∷ arg _ iv ∷ 
   a ← kompile-term a vars
   iv ← kompile-term iv vars
   return $ a ⊕ "[" ⊕ iv ⊕ "]"
+
+kompile-term (def (quote ix-lookup) (_ ∷ _ ∷ arg _ iv ∷ arg _ el ∷ [])) vars = do
+  iv ← kompile-term iv vars
+  el ← kompile-term el vars
+  return $ iv ⊕ "[" ⊕ el ⊕ "]"
+
 
 -- The last pattern in the list of `def` matches
 kompile-term (def n []) _ =
