@@ -367,6 +367,9 @@ tel-lookup-name tel n with n N.<? L.length (reverse tel)
 ... | no _ = error "Variable lookup in telescope failed"
 
 private
+  kcp : String → Err PatSt
+  kcp x = error $ "kompile-clpats: " ++ x
+
   infixl 10 _+=c_ _+=a_ _+=v_ _+=n_
   _+=c_ : PatSt → String → PatSt
   p +=c c = record p { conds = PatSt.conds p ++ [ c ] }
@@ -418,12 +421,27 @@ kompile-clpats tel (arg i (con (quote V.Vec._∷_) ps@(_ ∷ _ ∷ _ ∷ [])) �
   kompile-clpats tel (ps ++ l) (("len (" ++ v ++ ") - 1") ∷ ("hd (" ++ v ++ ")") ∷ ("tl (" ++ v ++ ")") ∷ ctx)
                  $ pst +=c ("nonemptyvec_p (" ++ v ++ ")")
 
+kompile-clpats tel (arg i (con (quote imap) (arg _ (var _) ∷ [])) ∷ l) (v ∷ ctx) pst = do
+  (ub , pst) ← pst-fresh pst $ "IMAP_" ++ v ++ "_"
+  -- The only thing that `x` could be is a variable, and since
+  -- we don't have higher-order functions in sac, we define a local
+  -- macro.  Note that we do not pass x further, to avoid assignment.
+  kompile-clpats tel l ctx $ pst +=v ub +=a ("#define " ++ ub ++ "(__x) (" ++ v ++ ")[__x]")
+
+kompile-clpats tel (arg i (con (quote imap) (arg _ (dot _) ∷ [])) ∷ l) (v ∷ ctx) pst =
+  -- We simply ignore this inner function entirely.
+  kompile-clpats tel l ctx $ pst
+
+kompile-clpats tel (arg i (con (quote imap) (arg _ (absurd _) ∷ [])) ∷ l) (v ∷ ctx) pst =
+  kcp "absurd pattern as an argument to imap (it wasn't possible in 2020)"
+
+
 kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
   -- No constraints, as there could only be a single value.
   kompile-clpats tel l ctx pst
 
-kompile-clpats tel (arg _ (con c _) ∷ _) (_ ∷ _) pst =
-  error $ "cannot handle patern-constructor " ++ showName c
+-- End of constructors here.
+
 
 kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
   -- Note that we do not distinguish between hidden and visible variables
@@ -453,9 +471,9 @@ kompile-clpats tel (arg i (absurd _) ∷ l) (v ∷ ctx) pst =
 
 
 kompile-clpats _ [] [] pst = ok pst
-kompile-clpats tel ps ctx patst = error $ "kompile-clpats failed, pattern: ["
-                                       ++ (", " ++/ L.map (λ where (arg _ x) → showPattern x) ps)
-                                       ++ "], ctx: [" ++ (", " ++/ ctx) ++ "]"
+kompile-clpats tel ps ctx patst = kcp $ "failed on pattern: ["
+                                     ++ (", " ++/ L.map (λ where (arg _ x) → showPattern x) ps)
+                                     ++ "], ctx: [" ++ (", " ++/ ctx) ++ "]"
 
 
 
@@ -509,6 +527,12 @@ kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
 ... | no ¬p | _ = kt "Incorrect argument mask"
 
 kompile-term (var x []) vars = var-lookup (reverse vars) x
+kompile-term (var x args@(_ ∷ _)) vars = do
+  f ← var-lookup (reverse vars) x
+  let l = L.length args
+  args ← kompile-arglist l args (mk-mask l) vars
+  return $ f ⊕ "(" ⊕ args ⊕ ")"
+
 kompile-term (lit l) vars = return $ ok $ showLiteral l
 
 kompile-term (con (quote N.zero) _) _ =

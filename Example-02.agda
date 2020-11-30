@@ -79,3 +79,38 @@ test-26f a b = imap λ iv → sel a iv + sel b iv
 
 test₂₆ : kompile test-26f [] [] ≡ ok _
 test₂₆ = refl
+
+
+test-27f : ∀ {d s} → (a b : Ar ℕ d s) → Ar ℕ d s
+test-27f (imap a) (imap b) = imap λ iv → a iv + b iv
+
+
+test-28f : ∀ {d s} → (a b : Ar ℕ d s) → Ar ℕ d s
+test-28f (imap _) (imap a) = imap λ iv → a iv + 1
+
+-- Testing for dot and absurd arguments of the imap.
+
+test-29f : ∀ {d s} → (a b : Ar ℕ d s) → a ≡ b → Ar ℕ d s
+test-29f (imap .a) (imap a) refl = imap λ iv → a iv + 1
+
+-- We cannot write this:
+--
+-- open import Data.Empty
+-- test-30f : Ar ⊥ 1 V.[ 1 ] → ⊥
+-- test-30f (imap f) = {!!}
+--
+-- even though `f` has type Ix 1 [1] → ⊥, which doesn't exist.
+
+module mat-mul where
+  postulate
+    asum : ∀ {n} → Ar ℕ 1 (n ∷ []) → ℕ
+
+
+  mm : ∀ {m n k} → let Mat a b = Ar ℕ 2 (a ∷ b ∷ []) in
+                  Mat m n → Mat n k → Mat m k
+  mm (imap a) (imap b) = imap λ iv →
+                                    let i = ix-lookup iv (# 0)
+                                        j = ix-lookup iv (# 1)
+                                    in asum (imap λ kv → let k = ix-lookup kv (# 0)
+                                                          in a (i ∷ k ∷ []) * b (k ∷ j ∷ []))
+
