@@ -84,14 +84,22 @@ test₂₆ = refl
 test-27f : ∀ {d s} → (a b : Ar ℕ d s) → Ar ℕ d s
 test-27f (imap a) (imap b) = imap λ iv → a iv + b iv
 
+test₂₇ : kompile test-27f [] [] ≡ ok _
+test₂₇ = refl
 
 test-28f : ∀ {d s} → (a b : Ar ℕ d s) → Ar ℕ d s
 test-28f (imap _) (imap a) = imap λ iv → a iv + 1
 
--- Testing for dot and absurd arguments of the imap.
+test₂₈ : kompile test-28f [] [] ≡ ok _
+test₂₈ = refl
 
+
+-- Testing for dot and absurd arguments of the imap.
 test-29f : ∀ {d s} → (a b : Ar ℕ d s) → a ≡ b → Ar ℕ d s
 test-29f (imap .a) (imap a) refl = imap λ iv → a iv + 1
+
+test₂₉ : kompile test-29f [] [] ≡ ok _
+test₂₉ = refl
 
 -- We cannot write this:
 --
@@ -105,12 +113,15 @@ test-29f (imap .a) (imap a) refl = imap λ iv → a iv + 1
 test-31f : Ar ℕ 1 V.[ 10 ] → Ar ℕ 1 V.[ 10 ]
 test-31f (imap f) = imap f
 
+test₃₁ : kompile test-31f [] [] ≡ ok _
+test₃₁ = refl
 
 -- Index types
 test-32f : Ix 2 (3 ∷ 4 ∷ []) → Fin 3
 test-32f ix = ix-lookup ix (# 0)
 
-
+test₃₂ : kompile test-32f [] [] ≡ ok _
+test₃₂ = refl
 
 module mat-mul where
   postulate
@@ -125,9 +136,33 @@ module mat-mul where
                                     in asum (imap λ kv → let k = ix-lookup kv (# 0)
                                                           in a (i ∷ k ∷ []) * b (k ∷ j ∷ []))
 
-  test₃₃ : kompile mm [] (quote asum ∷ []) ≡ ok _
+  mm-kompiled = kompile mm [] (quote asum ∷ [])
+  test₃₃ : mm-kompiled ≡ ok _
   test₃₃ = refl
 
-test-34f : ∀ {d s} → Ix (d + d) s → ℕ
-test-34f {0} [] =  1
-test-34f {suc _} (_∷_ {d}{s}{x} i ix) =  x
+-- This test ensurest that even if bound variables appear in
+-- different order than in the telescope, we can still use them.
+test-34f : ∀ {d s} → Ix (suc d) s → ℕ
+test-34f {_}{x ∷ s} (_∷_ i ix) =  x
+
+test-34t = kompile test-34f [] []
+test₃₄ : test-34t ≡ ok ("\n\n// Function Example-02.test-34f\n"
+                      ++ "int\nExample_02_test_34f(int x_1, int[.] x_2, int[.] x_4) {\n"
+                      ++ "/* assert (dim (x_4) == (1 + x_1)) */\n/* assert (x_4 < x_2) */\n"
+                      ++ "/* assert (shape (x_2)[[0]] == (1 + x_1)) */"
+                      ++ "int __ret;\nd = x_1;\nx = hd (x_2);\ns = tl (x_2);\n"
+                      ++ "i = hd (x_4);\nix = tl (x_4);\n__ret = x;\n"
+                      ++ "return __ret;\n}\n\n")
+test₃₄ = refl
+
+test-35f : ∀ {d s} → Ix (suc d) s → ℕ
+test-35f {_} (_∷_ {d}{s}{x} i ix) =  x
+
+test₃₅ : kompile test-35f [] [] ≡ ok ("\n\n// Function Example-02.test-35f\n"
+                                   ++ "int\nExample_02_test_35f(int x_1, int[.] x_2, int[.] x_4) {\n"
+                                   ++ "/* assert (dim (x_4) == (1 + x_1)) */\n/* assert (x_4 < x_2) */\n"
+                                   ++ "/* assert (shape (x_2)[[0]] == (1 + x_1)) */"
+                                   ++ "int __ret;\nd = x_1;\nx = hd (x_2);\ns = tl (x_2);\n"
+                                   ++ "i = hd (x_4);\nix = tl (x_4);\n__ret = x;\n"
+                                   ++ "return __ret;\n}\n\n")
+test₃₅ = refl

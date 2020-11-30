@@ -91,7 +91,7 @@ defaultPS = record { cnt = 1
 record PatSt : Set where
   constructor mk
   field
-    vars    : Strings
+    vars    : List (String × ℕ) --Strings
     assigns : Strings
     conds   : Strings
     cnt     : ℕ
@@ -158,7 +158,7 @@ kompile-fun ty (pat-lam cs []) n = do
   R.put $ PS.kst ps
   b ← kompile-cls cs (L.map (λ where (v ∈ _) → v) $ PS.ctx ps) rv
   return $ "// Function " ⊕ ns ⊕ "\n"
-         ⊕ rt ⊕ "\n" 
+         ⊕ rt ⊕ "\n"
          ⊕ nnorm ns ⊕ "(" ⊕ args ⊕ ") {\n"
          ⊕ "\n" ++/ L.map assrt-to-code arg-assrts
          ⊕ rt ⊕ " " ⊕ rv ⊕ ";\n"
@@ -329,15 +329,58 @@ private
   (error s) >>=e _ = return $ error s
   (ok x)    >>=e f = f x
 
+  -- sort in increasing order
+  list-sort : ∀ {a}{X : Set a} → (acc l : List (X × ℕ)) → List (X × ℕ)
+  list-sort acc [] = acc
+  list-sort acc (x ∷ l) = list-sort (insert acc x) l
+    where
+      insert : _ → _ → _
+      insert [] y = y ∷ []
+      insert (x ∷ xs) y with proj₂ y N.<? proj₂ x
+      ... | yes y<x = y ∷ x ∷ xs
+      ... | no  y≥x = x ∷ insert xs y
+
+
+  isperm : ∀ {a}{X : Set a} → (n max : ℕ) → (db : List ℕ) → List (X × ℕ) → Bool
+  isperm 0 0   [] [] = true
+  isperm n max db [] = does (1 + max N.≟ n) ∧ does (L.length db N.≟ n)
+  isperm n max db ((_ , x) ∷ xs) with list-has-el (N._≟ x) db
+  ...                      | true = false
+  ...                      | false = isperm n (max N.⊔ x) (x ∷ db) xs
+
+  perm : Telescope → List (String × ℕ) → Err (List String)
+  perm tel vs with isperm (L.length tel) 0 [] vs
+  ... | false = error $ ", " ++/ L.map (λ where (x , y) → "(" ++ x ++ ", " ++ showNat y ++ ")") vs
+                     ++ " is not a permutation of the telescope "
+                     ++ showTel tel
+  ... | true = ok $ L.reverse $ L.map proj₁ $ list-sort [] vs
+
+  module test-perm where
+    test₀ : isperm {X = ℕ} 0 0 [] [] ≡ true
+    test₀ = refl
+
+    test₁ : isperm 1 0 [] (("" , 0) ∷ []) ≡ true
+    test₁ = refl
+
+    test₂′ : isperm 2 0 [] (("" , 1) ∷ ("" , 0) ∷ []) ≡ true
+    test₂′ = refl
+
+    test₃ : isperm 3 0 [] (("" , 2) ∷ ("" , 0) ∷ ("" , 1) ∷ []) ≡ true
+    test₃ = refl
+
+    test₄ : isperm 4 0 [] (("" , 2) ∷ ("" , 2) ∷ ("" , 1) ∷ ("" , 3) ∷ []) ≡ false
+    test₄ = refl
+
 
 kompile-cls [] ctx ret = kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
   kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns _ _) = pst
-  t ← kompile-term t vars
-  let as = "\n" ++/ assgns
-  return $ as ⊕ "\n"
-         ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+  perm tel vars >>=e λ vars → do
+    t ← kompile-term t vars
+    let as = "\n" ++/ assgns
+    return $ as ⊕ "\n"
+          ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
 kompile-cls (absurd-clause tel ps ∷ []) ctx ret =
   -- Exactly the same as above
@@ -363,14 +406,15 @@ kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
   let (mk vars assgns conds _) = pst
       cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
       as = "\n" ++/ assgns
-  t ← kompile-term t vars
-  r ← kompile-cls ts ctx ret
-  return $ "if (" ⊕ cs ⊕ ") {\n"
-         ⊕ as ⊕ "\n"
-         ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
-         ⊕ "} else {\n"
-         ⊕ r ⊕ "\n"
-         ⊕ "}\n"
+  perm tel vars >>=e λ vars → do
+    t ← kompile-term t vars
+    r ← kompile-cls ts ctx ret
+    return $ "if (" ⊕ cs ⊕ ") {\n"
+           ⊕ as ⊕ "\n"
+           ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+           ⊕ "} else {\n"
+           ⊕ r ⊕ "\n"
+           ⊕ "}\n"
 
 
 
@@ -390,7 +434,7 @@ private
   _+=a_ : PatSt → String → PatSt
   p +=a a = record p { assigns = PatSt.assigns p ++ [ a ] }
 
-  _+=v_ : PatSt → String → PatSt
+  _+=v_ : PatSt → String × ℕ → PatSt
   p +=v v = record p { vars = PatSt.vars p ++ [ v ] }
 
   _+=n_ : PatSt → ℕ → PatSt
@@ -445,12 +489,12 @@ kompile-clpats tel (arg i (con (quote Ix._∷_) _) ∷ l) (v ∷ ctx) pst =
   kcp $ "matching on `s` and `x` in the Ix._∷_ is not supported, please rewrite the pattern"
 
 
-kompile-clpats tel (arg i (con (quote imap) (arg _ (var _) ∷ [])) ∷ l) (v ∷ ctx) pst = do
+kompile-clpats tel (arg _ (con (quote imap) (arg _ (var i) ∷ [])) ∷ l) (v ∷ ctx) pst = do
   (ub , pst) ← pst-fresh pst $ "IMAP_" ++ v ++ "_"
   -- The only thing that `x` could be is a variable, and since
   -- we don't have higher-order functions in sac, we define a local
   -- macro.  Note that we do not pass x further, to avoid assignment.
-  kompile-clpats tel l ctx $ pst +=v ub +=a ("#define " ++ ub ++ "(__x) (" ++ v ++ ")[__x]")
+  kompile-clpats tel l ctx $ pst +=v (ub , i) +=a ("#define " ++ ub ++ "(__x) (" ++ v ++ ")[__x]")
 
 kompile-clpats tel (arg i (con (quote imap) (arg _ (dot _) ∷ [])) ∷ l) (v ∷ ctx) pst =
   -- We simply ignore this inner function entirely.
@@ -470,7 +514,10 @@ kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
 kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
   -- Note that we do not distinguish between hidden and visible variables
   s ← tel-lookup-name tel i
-  let pst = pst +=v s
+  -- If the order of variable binding doesn't match the order
+  -- of the variables in the telescope, we have to consider `i` as well.
+  -- This changed with https://github.com/agda/agda/issues/5075
+  let pst = pst +=v (s , i)
   let pst = if does (s ≈? "_")
             then pst
             else pst +=a (s ++ " = " ++ v ++ ";")
@@ -550,7 +597,10 @@ kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
 
 ... | no ¬p | _ = kt "Incorrect argument mask"
 
-kompile-term (var x []) vars = var-lookup (reverse vars) x
+kompile-term (var x []) vars = do
+  (ok t) ← var-lookup (reverse vars) x
+    where _ → kt $ "var-lookup failed, var = " ++ showNat x ++ " vars = " ++ (", " ++/ vars)
+  return $ ok t
 kompile-term (var x args@(_ ∷ _)) vars = do
   f ← var-lookup (reverse vars) x
   let l = L.length args
