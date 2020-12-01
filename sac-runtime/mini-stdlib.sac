@@ -48,6 +48,7 @@ inline typ[*] sel (int idx, typ[*] a)                       \
 
 SEL_A_(int, 0)
 SEL_A_(bool, false)
+SEL_A_(float, 0f)
 
 // Shape
 inline int[.] shape (bool[*] a) { return _shape_A_ (a); }
@@ -187,7 +188,14 @@ inline bool[*] genarray (int[.] shp, bool b)
     return with {}: genarray (shp, b);
 }
 
+inline float[*] genarray (int[.] shp, float b)
+{
+    return with {}: genarray (shp, b);
+}
 
-inline int[*] zero(int[.] sh) {
+inline int[*] zero_int(int[.] sh) {
   return genarray (sh, 0);
+}
+inline float[*] zero_float(int[.] sh) {
+  return genarray (sh, 0f);
 }

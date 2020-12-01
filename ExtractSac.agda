@@ -6,15 +6,16 @@ open import Data.String as S hiding (_++_) renaming (_≟_ to _≟s_)
 open import Data.List as L hiding (_++_)
 open import Data.List.Categorical
 open import Data.Nat as N
+open import Agda.Builtin.Nat using (div-helper; mod-helper)
+
 open import Data.Nat.Properties as N
 open import Data.Nat.Show renaming (show to showNat)
 open import Data.Product as Σ hiding (map)
 open import Data.Sum hiding (map)
-open import Data.Fin using (Fin; zero; suc; fromℕ<; #_)
 open import Data.Vec as V using (Vec; [] ; _∷_)
 open import Data.Char renaming (_≈?_ to _c≈?_)
 open import Data.Bool
-open import Data.Fin as F using (Fin; zero; suc; inject₁)
+open import Data.Fin as F using (Fin; zero; suc; inject₁; fromℕ<; #_)
 open import Data.Maybe using (Maybe; just; nothing)
 
 open import Category.Monad
@@ -26,11 +27,15 @@ open import Relation.Nullary.Decidable hiding (map)
 
 open import Reflection hiding (return; _>>=_; _>>_)
 open import Reflection.Term
+import      Reflection.Name as RN
 
 open import Function
 
 open import Array.Base
 open import Array.Properties
+open import APL2 using (reduce-1d)
+
+open import Agda.Builtin.Float
 
 open RawMonad ⦃ ... ⦄
 
@@ -113,11 +118,13 @@ kompile-term   : Term → (varctx : Strings) → SKS Prog
 -- Normalise the name of the symbols (functions, constructors, ...)
 -- that we obtain from showName, i.e. remove dots, replace weird
 -- symbols with ascii.
-nnorm : String → Prog
-nnorm s = ok
-        $ replace '.' "_"
+nnorm : String → String
+nnorm s = replace '.' "_"
         $ replace '-' "_"
         $ replace '+' "plus"
+        $ replace 'α' "alpha"
+        $ replace 'ω' "omega"
+        $ replace '→' "to"
         $ s
   where
     repchar : (from : Char) (to : String) (x : Char) → String
@@ -217,6 +224,7 @@ kompile-ty (con c args) pi-ok =
   kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
 kompile-ty (def (quote ℕ) args) _ = return $ ok int
 kompile-ty (def (quote Bool) args) _ = return $ ok bool
+kompile-ty (def (quote Float) args) _ = return $ ok float
 kompile-ty (def (quote Fin) (arg _ x ∷ [])) _ = do
   ok p ← sps-kompile-term x where error x → ke x
   v ← PS.cur <$> P.get
@@ -514,6 +522,7 @@ kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
 kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
   -- Note that we do not distinguish between hidden and visible variables
   s ← tel-lookup-name tel i
+  let s = nnorm s
   -- If the order of variable binding doesn't match the order
   -- of the variables in the telescope, we have to consider `i` as well.
   -- This changed with https://github.com/agda/agda/issues/5075
@@ -576,6 +585,20 @@ mk-mask (suc n) = L.reverse $ go n (suc n) N.≤-refl
     go 0       (suc _) _  = zero ∷ []
     go (suc m) n       pf = F.fromℕ< pf ∷ go m n (sa<b⇒a<b m n pf)
 
+
+-- TODO lift it up
+SAC-funs : List (Name × String)
+SAC-funs = (quote _+_ , "_add_SxS_")
+         ∷ (quote _*_ , "_mul_SxS_")
+         ∷ (quote primFloatPlus , "_add_SxS_")
+         ∷ (quote primFloatMinus , "_sub_SxS_")
+         ∷ (quote primFloatTimes , "_mul_SxS_")
+         ∷ (quote primFloatDiv , "_div_SxS_")
+         ∷ (quote primFloatExp , "Math::exp")
+         ∷ (quote primFloatNegate , "_neg_S_")
+         ∷ []
+
+
 private
   module mask-tests where
     test-mk-mask₁ : mk-mask 0 ≡ []
@@ -607,6 +630,7 @@ kompile-term (var x args@(_ ∷ _)) vars = do
   args ← kompile-arglist l args (mk-mask l) vars
   return $ f ⊕ "(" ⊕ args ⊕ ")"
 
+kompile-term (lit l@(float _)) vars = return $ showLiteral l ⊕ "f"
 kompile-term (lit l) vars = return $ ok $ showLiteral l
 
 kompile-term (con (quote N.zero) _) _ =
@@ -650,7 +674,6 @@ kompile-term (con (quote V.Vec._∷_) args) vars = do
   args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
   return $ "cons (" ⊕ args ⊕ ")"
 
-
 -- Ix constructors
 kompile-term (con (quote Ix.[]) []) vars =
   return $ ok "[]"
@@ -670,11 +693,12 @@ kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ 
   let ctx = L.map (λ v → v ∈ error "?") vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
+      bt = bt <$> rt
   --R.put (PS.kst ps)
   iv ← kt-fresh "iv_"
   s ← kompile-term s vars
   b ← kompile-term e $ vars ++ [ iv ]
-  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray (" ⊕ s ⊕ ", zero (" ⊕ in-sh ⊕ "))"
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray (" ⊕ s ⊕ ", zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
 
 -- Imaps with an expression
 kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ arg _ e ∷ [])) vars = do
@@ -682,20 +706,29 @@ kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ 
   let ctx = L.map (λ v → v ∈ error "?") vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
+      bt = bt <$> rt
   --R.put (PS.kst ps)
   iv ← kt-fresh "iv_"
   s ← kompile-term s vars
   b ← kompile-term e $ vars
-  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ " (" ⊕ iv ⊕ "); }: genarray (" ⊕ s ⊕ ", zero (" ⊕ in-sh ⊕ "))"
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ " (" ⊕ iv ⊕ "); }: genarray (" ⊕ s ⊕ ", zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
 
 
 kompile-term (con c _) vars  = kt $ "don't know constructor " ++ (showName c)
 
+-- Definitions
 
-kompile-term (def (quote N._+_) args) vars =
-  ("_add_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
-kompile-term (def (quote N._*_) args) vars =
-  ("_mul_SxS_ (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (mk-mask 2) vars
+-- From Agda.Builtin.Nat: div-helper k m n j = k + (n + m - j) div (1 + m)
+kompile-term (def (quote div-helper) (arg _ k ∷ arg _ m ∷ arg _ n ∷ arg _ j ∷ [])) vars = do
+  k ← kompile-term k vars
+  m ← kompile-term m vars
+  n ← kompile-term n vars
+  j ← kompile-term j vars
+  return $ "_div_SxS_ (" ⊕ k ⊕ " + (" ⊕ n ⊕ " + " ⊕ m ⊕ " - " ⊕ j ⊕ "), 1 + " ⊕ m ⊕ ")"
+
+kompile-term (def (quote V._++_) args) vars = do
+  args ← kompile-arglist 6 args (# 4 ∷ # 5 ∷ []) vars
+  return $ "concat (" ⊕ args ⊕ ")"
 
 -- Array stuff
 kompile-term (def (quote sel) (_ ∷ _ ∷ _ ∷ _ ∷ arg _ a ∷ arg _ iv ∷ [])) vars = do
@@ -708,12 +741,46 @@ kompile-term (def (quote ix-lookup) (_ ∷ _ ∷ arg _ iv ∷ arg _ el ∷ [])) 
   el ← kompile-term el vars
   return $ iv ⊕ "[" ⊕ el ⊕ "]"
 
+kompile-term (def (quote V.lookup) (_ ∷ _ ∷ _ ∷ arg _ v ∷ arg _ i ∷ [])) vars = do
+  v ← kompile-term v vars
+  i ← kompile-term i vars
+  return $ v ⊕ "[" ⊕ i ⊕ "]"
+
+kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ arg _ s ∷ arg _ (def f _) ∷ arg _ ε ∷ arg _ a ∷ [])) vars = do
+  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
+            (just (_ , f)) → f
+            _ → nnorm $ showName f
+  ε ← kompile-term ε vars
+  a ← kompile-term a vars
+  s ← kompile-term s vars
+  iv ← kt-fresh "iv_"
+  return $ "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ a ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ ε ⊕ ")"
+
+kompile-term (def (quote reduce-1d) _) vars =
+  -- FIXME try to automate this.
+  kt $ "cannot handle `reduce-1d` with non-symbolic function, please lift it into definition"
+
+-- A bunch of functions that are mapped to id in sac
+kompile-term (def (quote F.fromℕ<) args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 3 args (# 0 ∷ []) vars
+kompile-term (def (quote F.toℕ)    args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (# 1 ∷ []) vars
+--... | "Array.Base.subst-ix" = okl "id (" #p comp-arglistx 5 args (# 4 ∷ []) vars #p okl ")"
+--... | "Array.Base.subst-ar" = okl "id (" #p comp-arglistx 7 args (# 6 ∷ []) vars #p okl ")"
+--... | "Array.Properties.a→ix" = okl "id (" #p comp-arglistx 4 args (# 1 ∷ []) vars #p okl ")"
+--... | "Array.Base.a→s" = okl "id (" #p comp-arglistx 2 args (# 1 ∷ []) vars #p okl ")"
+
+
 
 -- The last pattern in the list of `def` matches
 kompile-term (def n []) _ =
   kt $ "attempting to compile `" ++ showName n ++ "` as function with 0 arguments"
 
-kompile-term (def n args@(_ ∷ _)) vars = do
+kompile-term (def n args@(_ ∷ _)) vars with list-find-el ((RN._≟ n) ∘ proj₁) SAC-funs
+... | just (_ , f) = do
+  let l = L.length args
+  args ← kompile-arglist l args (mk-mask l) vars
+  return $ f ⊕ " (" ⊕ args ⊕ ")"
+
+... | nothing = do
   R.modify λ k → record k { funs = KS.funs k ++ [ n ] }
   let n = nnorm $ showName n
       l = L.length args
