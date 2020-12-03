@@ -84,9 +84,9 @@ data Err++Ty : Set → Set → Set where
 infixr 5 _⊕_
 _⊕_ : ∀ {A B}{{t : Err++Ty A B}} → A → B → Prog
 _⊕_ {{t = s-s}} a         b = ok $! (a ++ b)
-_⊕_ {{t = e-s}} (error x) b = error x
+_⊕_ {{t = e-s}} (error x) b = error $! x
 _⊕_ {{t = e-s}} (ok x)    b = ok $! (x ++ b)
-_⊕_ {{t = s-e}} a (error x) = error x
+_⊕_ {{t = s-e}} a (error x) = error $! x
 _⊕_ {{t = s-e}} a    (ok x) = ok $! (a ++ x)
 _⊕_ {{t = e-e}} a         b = id $! (a ++ b)
 

@@ -47,7 +47,7 @@ macro
      te ← withReconstructed $ getDefinition f >>= λ where
            (function cs) → return $ pat-lam cs []
            _ → return unknown
-     --te ← pat-lam-norm te base-funs
+     te ← pat-lam-norm te base-funs
      q ← quoteTC te
      unify a q
 

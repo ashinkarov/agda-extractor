@@ -303,6 +303,15 @@ kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _
   P.modify $ _p+=a (mk v $′ "assert (" ++ x ++ " == " ++ y ++ ")")
   return $ ok unit
 
+kompile-ty (def (quote _≥a_) (_ ∷ _ ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
+  ok x ← sps-kompile-term x where error x → ke x
+  ok y ← sps-kompile-term y where error x → ke x
+  v ← PS.cur <$> P.get
+  P.modify $ _p+=a (mk v $′ "assert (" ++ x ++ " >= " ++ y ++ ")")
+  return $ ok unit
+
+
+
 kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
 
 kompile-ty t _ =
@@ -730,6 +739,20 @@ kompile-term (def (quote V._++_) args) vars = do
   args ← kompile-arglist 6 args (# 4 ∷ # 5 ∷ []) vars
   return $ "concat (" ⊕ args ⊕ ")"
 
+
+kompile-term (def (quote V.tabulate) (_ ∷ arg _ ty ∷ arg _ l ∷ arg _ (vLam x e) ∷ [])) vars = do
+  kst ← R.get
+  let ctx = L.map (λ v → v ∈ error "?") vars
+      (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
+      in-sh = sacty-shape =<< rt
+      bt = bt <$> rt
+  --R.put (PS.kst ps)
+  iv ← kt-fresh "iv_"
+  l ← kompile-term l vars
+  b ← kompile-term e $ vars ++ [ iv ]
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray ([" ⊕ l ⊕ "], zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
+
+
 -- Array stuff
 kompile-term (def (quote sel) (_ ∷ _ ∷ _ ∷ _ ∷ arg _ a ∷ arg _ iv ∷ [])) vars = do
   a ← kompile-term a vars
@@ -746,19 +769,21 @@ kompile-term (def (quote V.lookup) (_ ∷ _ ∷ _ ∷ arg _ v ∷ arg _ i ∷ []
   i ← kompile-term i vars
   return $ v ⊕ "[" ⊕ i ⊕ "]"
 
-kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ arg _ s ∷ arg _ (def f _) ∷ arg _ ε ∷ arg _ a ∷ [])) vars = do
-  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
-            (just (_ , f)) → f
-            _ → nnorm $ showName f
-  ε ← kompile-term ε vars
-  a ← kompile-term a vars
-  s ← kompile-term s vars
-  iv ← kt-fresh "iv_"
-  return $ "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ a ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ ε ⊕ ")"
+--kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ arg _ s ∷ arg _ (def f args) ∷ arg _ ε ∷ arg _ a ∷ [])) vars = do
+--  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
+--            (just (_ , f)) → f
+--            _ → nnorm $ showName f
+--  ε ← kompile-term ε vars
+--  a ← kompile-term a vars
+--  s ← kompile-term s vars
+--  iv ← kt-fresh "iv_"
+--  return $ "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ a ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ ε ⊕ ")"
 
-kompile-term (def (quote reduce-1d) _) vars =
+--kompile-term (def (quote reduce-1d) _) vars =
+kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ _ ∷ arg _ a ∷ _)) vars =
   -- FIXME try to automate this.
-  kt $ "cannot handle `reduce-1d` with non-symbolic function, please lift it into definition"
+  let aa = S.fromList $ L.take 200 $ S.toList $ showTerm a in
+  kt $ "cannot handle `reduce-1d` with non-symbolic function, please lift it into definition a = " ++ aa
 
 -- A bunch of functions that are mapped to id in sac
 kompile-term (def (quote F.fromℕ<) args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 3 args (# 0 ∷ []) vars

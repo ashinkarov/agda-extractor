@@ -1,6 +1,7 @@
 open import Data.Nat as N using (ℕ; zero; suc)
 open import Data.Nat.Properties as N
 open import Data.Vec as V using (Vec; []; _∷_)
+open import Data.Vec.Properties as V
 open import Data.Fin as F using (Fin; zero; suc)
 import      Data.Fin.Properties as F
 open import Data.List as L using (List; []; _∷_)
@@ -10,7 +11,7 @@ import      Data.Nat.DivMod as N
 open import Data.Bool using (Bool; true; false)
 open import Data.Product renaming (_×_ to _⊗_)
 
-open import Relation.Binary.PropositionalEquality using (_≡_; refl; cong; sym) -- (Extensionality)
+open import Relation.Binary.PropositionalEquality -- using (≡-Reasoning; _≡_; refl; cong; sym; subst; subst₂) -- (Extensionality)
 open import Relation.Nullary
 open import Relation.Nullary.Decidable
 open import Relation.Nullary.Negation
@@ -183,19 +184,49 @@ data DyScalVec (X : Set) : Set → Set → (d : ℕ) → (sh : Vec ℕ d) → Se
 ▴ᵣ ⦃ t = a-a {args = 0-n} ⦄ b = b
 
 
-infixr 20 _-′_
-_-′_ = lift′ N._∸_
+--infixr 20 _-′_
+--_-′_ = lift′ N._∸_
 
--- FIXME: I guess we can eliminate _-′_ and lift′ entirely by inlining definitions.
+
+_-safe-_ : (a : ℕ) → (b : ℕ) .{≥ : a N.≥ b} → ℕ
+a -safe- b = a N.∸ b
+
+{-
+infixr 20 _-ₙ_
+_-ₙ_ : ∀ {n}{s}
+     → (a : Ar ℕ n s) → (b : Ar ℕ n s)
+     → .{≥ : a ≥a b}
+     → Ar ℕ n s
+(imap f -ₙ imap g) {≥} = imap λ iv → (f iv -safe- g iv) {≥ = ≥ iv}
+-}
+
+
+---- FIXME: I guess we can eliminate _-′_ and lift′ entirely by inlining definitions.
+--infixr 20 _-_
+--_-_ : ∀ {A B d s}{{t : DyScalVec ℕ A B d s}} → (a : A) → (b : B) → .{≥ : ▴ₗ a ≥a ▴ᵣ b} → Ar ℕ d s
+--_-_ ⦃ t = s-s ⦄ a b {a≥b} = imap λ iv → (a -safe- b) {a≥b iv}
+--_-_ ⦃ t = s-v ⦄ a b {a≥b} = imap λ iv → (a -safe- sel (▴ b) iv) {a≥b iv}
+--_-_ ⦃ t = s-a ⦄ a b {a≥b} = imap λ iv → (a -safe- sel b iv) {a≥b iv} --= ▴ a -′ b
+--_-_ ⦃ t = v-s ⦄ a b {a≥b} = imap λ iv → (sel (▴ a) iv -safe- b) {a≥b iv} -- = ▴ a -′ ▴ b
+--_-_ ⦃ t = v-v ⦄ a b {a≥b} = imap λ iv → (sel (▴ a) iv -safe- sel (▴ b) iv) {a≥b iv} --= ▴ a -′ ▴ b
+--_-_ ⦃ t = a-s ⦄ a b {a≥b} = imap λ iv → (sel a iv -safe- b) {a≥b iv} --= a -′ ▴ b
+--_-_ ⦃ t = a-a {args = n-n} ⦄ a b {a≥b} = imap λ iv → (sel a iv -safe- sel b iv) {a≥b iv}
+--_-_ ⦃ t = a-a {args = n-0} ⦄ a b {a≥b} = imap λ iv → (sel a iv -safe- sel b []) {a≥b iv}
+--_-_ ⦃ t = a-a {args = 0-n} ⦄ a b {a≥b} = imap λ iv → (sel a [] -safe- sel b iv) {a≥b iv}
+
+
 infixr 20 _-_
-_-_ : ∀ {A B d s}{{t : DyScalVec ℕ A B d s}} → (a : A) → (b : B) → .{▴ₗ a ≥a ▴ᵣ b} → Ar ℕ d s
-_-_ ⦃ t = s-s ⦄ a b = ▴ a -′ ▴ b
-_-_ ⦃ t = s-v ⦄ a b = ▴ a -′ ▴ b
-_-_ ⦃ t = s-a ⦄ a b = ▴ a -′ b
-_-_ ⦃ t = v-s ⦄ a b = ▴ a -′ ▴ b
-_-_ ⦃ t = v-v ⦄ a b = ▴ a -′ ▴ b
-_-_ ⦃ t = a-s ⦄ a b = a -′ ▴ b
-_-_ ⦃ t = a-a {args = args} ⦄ a b = _-′_ {args = args} a b
+_-_ : ∀ {A B d s}{{t : DyScalVec ℕ A B d s}} → (a : A) → (b : B) → .{≥ : ▴ₗ a ≥a ▴ᵣ b} → Ar ℕ d s
+_-_ ⦃ t = s-s ⦄ a b  = imap λ iv → (a N.∸ b) 
+_-_ ⦃ t = s-v ⦄ a b  = imap λ iv → (a N.∸ sel (▴ b) iv)
+_-_ ⦃ t = s-a ⦄ a b  = imap λ iv → (a N.∸ sel b iv)
+_-_ ⦃ t = v-s ⦄ a b  = imap λ iv → (sel (▴ a) iv N.∸ b)
+_-_ ⦃ t = v-v ⦄ a b  = imap λ iv → (sel (▴ a) iv N.∸ sel (▴ b) iv)
+_-_ ⦃ t = a-s ⦄ a b  = imap λ iv → (sel a iv N.∸ b)
+_-_ ⦃ t = a-a {args = n-n} ⦄ a b  = imap λ iv → (sel a iv N.∸ sel b iv) 
+_-_ ⦃ t = a-a {args = n-0} ⦄ a b  = imap λ iv → (sel a iv N.∸ sel b []) 
+_-_ ⦃ t = a-a {args = 0-n} ⦄ a b  = imap λ iv → (sel a [] N.∸ sel b iv) 
+-- _-′_ {args = args} a b
 
 
 lift : ∀ {X A B d s}{{t : DyScalVec X A B d s}} → A → B → (_⊕_ : X → X → X) → Ar X d s
@@ -337,8 +368,27 @@ module _ where
                                         λ v → v <a sh)
                                       n (a→s sh)
 
-  a<b⇒b≡c⇒a<c : ∀ {a b c} → a N.< b → b ≡ c → a N.< c
-  a<b⇒b≡c⇒a<c a<b refl = a<b
+  data iota-t : Set → (n : ℕ) → Set where
+    instance
+      iota-scal : iota-t ℕ 0
+      iota-vect : ∀ {n} → iota-t (Vec ℕ n) n
+      iota-arrs : iota-t (Ar ℕ 0 []) 1
+      iota-arrv : ∀ {n} → iota-t (Ar ℕ 1 (n ∷ [])) n
+
+  iota-ty : ∀ {X n} → iota-t X n → X → Set
+  iota-ty {n = n} iota-scal x = Ar (Ix 1 (x ∷ [])) 1 (x ∷ [])
+  iota-ty {n = n} iota-vect x = Ar (Ix n x) n x
+  iota-ty {n = n} iota-arrs x = Ar (Ix n (▾ x ∷ [])) n (▾ x ∷ [])
+  iota-ty {n = n} iota-arrv x = Ar (Ix n (▾ x)) n (▾ x)
+
+  iota_ : ∀ {X n}{{t : iota-t X n}} → (x : X) → iota-ty t x
+  iota_ ⦃ t = iota-scal ⦄ x = imap id
+  iota_ ⦃ t = iota-vect ⦄ x = imap id
+  iota_ ⦃ t = iota-arrs ⦄ x = imap id
+  iota_ ⦃ t = iota-arrv ⦄ x = imap id
+
+
+
 
 {-
   iota-t : ∀ {A d s} → SVup ℕ A d s → Ar ℕ d s → Set
@@ -352,6 +402,9 @@ module _ where
   iota_ {d = d}{s}⦃ t = arry ⦄ a = {!!} --imap id
 -}
 
+  a<b⇒b≡c⇒a<c : ∀ {a b c} → a N.< b → b ≡ c → a N.< c
+  a<b⇒b≡c⇒a<c a<b refl = a<b
+  
   infixr 20 ι_
   ι_ : ∀ {d n s}{{c : iota-type d n s}}
     → (sh : Ar ℕ d s)
@@ -418,6 +471,89 @@ module cnn where
   A<B⇒K<2⇒A*2+K<B*2 : ∀ {n s}{a b k : Ar ℕ n s} → a <a b → k <a (cst 2) → ((a × 2) + k) <a (b × 2)
   A<B⇒K<2⇒A*2+K<B*2 {a = imap a} {imap b} {imap k} a<b k<2 = λ iv → a<b⇒k<2⇒a*2+k<b*2 (a<b iv) (k<2 iv)
 
+
+  ---
+  a<n⇒b<n⇒a+b<m+n : ∀ {m n} a b → a N.< m → b N.< n → a N.+ b N.< m N.+ n
+  a<n⇒b<n⇒a+b<m+n {m}     zero b a<m b<n            = ≤-stepsˡ m b<n
+  a<n⇒b<n⇒a+b<m+n {suc m} (suc a) b (N.s≤s a<m) b<n = N.s≤s (a<n⇒b<n⇒a+b<m+n a b a<m b<n)
+
+  a<n⇒b<n⇒a+b<m+n-1 : ∀ {m n} a b → a N.< m → b N.< n → a N.+ b N.< m N.+ n N.∸ 1
+  a<n⇒b<n⇒a+b<m+n-1 {suc m} {suc n} zero b a<m b<n            = ≤-stepsˡ m b<n
+  a<n⇒b<n⇒a+b<m+n-1 {suc m} {suc n} (suc a) b (N.s≤s a<m) b<n rewrite +-suc m n =
+      N.s≤s $ begin
+       suc (a N.+ b)       ≤⟨ a<n⇒b<n⇒a+b<m+n-1 a b a<m b<n ⟩
+       m N.+ suc n N.∸ 1   ≡⟨ cong₂ N._∸_ (+-suc m n) refl ⟩
+       suc (m N.+ n) N.∸ 1 ≡⟨⟩
+       m N.+ n
+      ∎
+      where open N.≤-Reasoning
+
+  _+ff_ : ∀ {m n} → Fin m → Fin n → Fin (m N.+ n N.∸ 1)
+  a +ff b = F.fromℕ< (a<n⇒b<n⇒a+b<m+n-1 _ _ (F.toℕ<n a) (F.toℕ<n b))
+  
+  _+f_ : ∀ {m n} → Fin m → Fin n → Fin (m N.+ n)
+  a +f b = F.fromℕ< (a<n⇒b<n⇒a+b<m+n _ _ (F.toℕ<n a) (F.toℕ<n b))
+
+  _*lf_ : ∀ {n} → (m : ℕ) → Fin n → .{m N.> 0} → Fin (suc (m N.* n N.∸ m))
+  _*lf_ {n} m (b) {m>0} = let
+                            m*sb≤m*n    = *-monoʳ-≤ m $ F.toℕ<n b
+                            m+m*b≤m*n   = subst₂ N._≤_ (*-suc m _)   refl m*sb≤m*n
+                            m+m*b-m≤m*n = ∸-monoˡ-≤  m m+m*b≤m*n
+                            m*b≤m*n-m   = subst₂ N._≤_ (m+n∸m≡n m _) refl m+m*b-m≤m*n
+                          in F.fromℕ< (N.s≤s m*b≤m*n-m)
+
+  --_i+_ : ∀ {n s s'} → Ix n s → Ix n s' → Ix n (▾ ((s + s') -′ ▴ 1))
+  --iv i+ jv = ix-tabulate λ i → subst Fin (sym (V.lookup∘tabulate _ i)) $ ix-lookup iv i +ff ix-lookup jv i
+
+
+
+  -- Note that we explicitly use _-′_ instead of _-_ to avoid the proof.
+  -- It is ok if m ≥ s×m as this means that s=0, and therefore there is no
+  -- such index (element of Fin 0 at some position in s).
+  --_il×_ : ∀ {n s} → (m : ℕ) → Ix n s → .{≥ : m N.> 0} → let s = 1 + (m × s) -′ ▴ m in Ix n (▾ s)
+  --(a il× ix) {m>0} = ix-tabulate λ i → subst Fin (sym (V.lookup∘tabulate _ i)) $ (a *lf ix-lookup ix i){m>0}
+
+{-
+  avgpool' : ∀ {s}
+          → Ar Float 2 $ ▾ (2 × s)
+          → Ar Float 2 s
+  avgpool' {s} (imap p) = imap body
+    where
+          m>0⇒k≤k*m : ∀ {m} → m N.> 0 → ∀ k → k N.≤ k N.* m
+          m>0⇒k≤k*m m>0 zero = N.z≤n
+          m>0⇒k≤k*m m>0 (suc k) = +-mono-≤ m>0 (m>0⇒k≤k*m m>0 k)
+
+          --a≤a*b
+
+          thm : ∀ {d s} → Ix d s → ∀ i → d N.+ (d N.* V.lookup s i N.∸ d) ≡ d N.* V.lookup s i
+          thm {d}{s} ix i with V.lookup s i | ix-lookup ix i
+          ... | zero  | ()
+          ... | suc m | _ = m+[n∸m]≡n (m>0⇒k≤k*m {m = suc m} (N.s≤s N.z≤n) d)
+
+          thmx : ∀ {d s} → Ix d s → ∀ i → V.lookup (▾ (d + (d × s) -′ ▴ d)) i ≡ V.lookup (▾ (d × s)) i
+          thmx {d}{s} ix i with V.lookup s i | inspect (V.lookup s) i  | ix-lookup ix i
+          ... | zero  | _      | ()
+          ... | suc m | [ pf ] | _ = begin
+             V.lookup (V.tabulate (λ z → d N.+ (d N.* V.lookup s z N.∸ d))) i ≡⟨ lookup∘tabulate _ i ⟩
+             d N.+ (d N.* V.lookup s i N.∸ d) ≡⟨ cong (d N.+_) (cong (N._∸ d) (cong (d N.*_) pf)) ⟩
+             d N.+ (d N.* suc m N.∸ d)        ≡⟨ m+[n∸m]≡n (m>0⇒k≤k*m {m = suc m} (N.s≤s N.z≤n) d) ⟩
+             d N.* suc m                      ≡⟨ cong (d N.*_) (sym pf) ⟩
+             d N.* V.lookup s i               ≡⟨ sym (lookup∘tabulate _ i) ⟩
+             V.lookup (V.tabulate (λ z → d N.* V.lookup s z)) i
+             ∎
+             where open ≡-Reasoning
+
+
+          body : _ → _
+          body iv = let
+                    ixs = iota (2 ∷ 2 ∷ [])
+                    ix = (2 il× iv) {N.s≤s N.z≤n}
+                    f iv = p $ subst-ix {!!} $ iv i+ ix
+                    xx = primFloatPlus / , f ̈ ixs
+                    in {!!}
+
+-}
+
   avgpool : ∀ {s}
           → Ar ℕ 2 $ ▾ (s × 2)
           → Ar ℕ 2 s
@@ -432,10 +568,74 @@ module cnn where
                  (i , pf) → p $ a→ix (bx + i) sh $ A<B⇒K<2⇒A*2+K<B*2 ix<s pf
                in ▾ (_× 4 $ N._+_ / , use-ixs ̈ ixs)
 
-
-
 --test : ∀ {s : Vec ℕ 2} → ℕ
 --test {s} = {! s × 2!}
+
+
+
+-- Take and Drop
+ax+sh<s : ∀ {n}
+        → (ax sh s : Ar ℕ 1 (n ∷ []))
+        → (s≥sh : s ≥a sh)
+        → (ax <a (s - sh) {≥ = s≥sh})
+        → (ax + sh) <a s
+ax+sh<s (imap ax) (imap sh) (imap s) s≥sh ax<s-sh iv =
+    let
+      ax+sh<s-sh+sh = +-monoˡ-< (sh iv) (ax<s-sh iv)
+      s-sh+sh≡s     = m∸n+n≡m (s≥sh iv)
+    in a<b⇒b≡c⇒a<c ax+sh<s-sh+sh s-sh+sh≡s
+
+
+_↑_ : ∀ {a}{X : Set a}{n s}
+    → (sh : Ar ℕ 1 (n ∷ []))
+    → (a : Ar X n s)
+    → {pf : s→a s ≥a sh}
+    → Ar X n $ a→s sh
+_↑_ {s = s} sh       (imap f) {pf}   with (prod $ a→s sh) N.≟ 0
+_↑_ {s = s} sh       (imap f) {pf} | yes Πsh≡0 = mkempty _ Πsh≡0
+_↑_ {s = s} (imap q) (imap f) {pf} | no  Πsh≢0 = imap mtake
+  where
+    mtake : _
+    mtake iv = let
+                  ai , ai< = ix→a iv
+                  ix<q jv = a<b⇒b≡c⇒a<c (ai< jv) (s→a∘a→s (imap q) jv)
+                  ix = a→ix ai (s→a s) λ jv → ≤-trans (ix<q jv) (pf jv)
+               in f (subst-ix (a→s∘s→a s) ix)
+
+
+_↓_ : ∀ {a}{X : Set a}{n s}
+    → (sh : Ar ℕ 1 (n ∷ []))
+    → (a : Ar X n s)
+    → {pf : (s→a s) ≥a sh}
+    → Ar X n $ a→s $ (s→a s - sh) {≥ = pf}
+_↓_ {s = s} sh (imap x) {pf} with
+                             let p = prod $ a→s $ (s→a s - sh) {≥ = pf}
+                             in  p N.≟ 0
+_↓_ {s = s} sh       (imap f) {pf} | yes Π≡0 = mkempty _ Π≡0
+_↓_ {s = s} (imap q) (imap f) {pf} | no  Π≢0 = imap mkdrop
+  where
+    mkdrop : _
+    mkdrop iv = let
+                  ai , ai< = ix→a iv
+                  ax = ai + (imap q)
+                  thmx = ax+sh<s
+                           ai (imap q) (s→a s) pf
+                           λ jv → a<b⇒b≡c⇒a<c (ai< jv)
+                                  (s→a∘a→s ((s→a s - (imap q)) {≥ = pf}) jv)
+                  ix = a→ix ax (s→a s) thmx
+                in f (subst-ix (a→s∘s→a s) ix)
+
+
+
+
+
+_̈⟨_⟩_ : ∀ {a}{X Y Z : Set a}{n s} 
+     → Ar X n s
+     → (X → Y → Z)
+     → Ar Y n s → Ar Z n s
+--(imap p) ̈⟨ f ⟩ (imap p₁) = imap λ iv → f (p iv) (p₁ iv)
+p ̈⟨ f ⟩ p₁ = imap λ iv → f (sel p iv) (sel p₁ iv)
+
 
 module test where
   s : Vec ℕ 3
