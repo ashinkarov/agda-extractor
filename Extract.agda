@@ -1,5 +1,5 @@
-open import Structures
-open import Reflection hiding (return; _>>=_; _>>_)
+open import Structures --using (KS; SKS; ks; TCS; Prog; monadTC; _⊕_; Err; ok; error; list-has-el; lift-state; lift-mstate)
+open import Reflection as RE hiding (return; _>>=_; _>>_)
 open import Reflection.Show
 
 module Extract (kompile-fun : Type → Term → Name → SKS Prog) where
@@ -12,17 +12,20 @@ open import Data.List as L hiding (_++_)
 open import Data.Unit using (⊤)
 open import Data.Product
 open import Data.Bool
+open import Data.String as S hiding (_++_)
+open import Data.Maybe as M hiding (_>>=_)
 
-open import Function using (_$_; case_of_)
+open import Function --using (_$_; case_of_)
+
+open import ReflHelper
 
 open import Category.Monad using (RawMonad)
-open import Category.Monad.State
+open import Category.Monad.State using (StateTMonadState; RawMonadState)
 open RawMonad {{...}} public
 
 
 {-# TERMINATING #-}
 kompile-fold   : TCS Prog
-pat-lam-norm : Term → Names → TC Term
 
 macro
   -- Main entry point of the extractor.
@@ -34,57 +37,16 @@ macro
   -- potential recursive extraction.
   kompile : Name → Names → Names → Term → TC ⊤
   kompile n base skip hole = do
-    (p , _) ← kompile-fold $ ks [ n ] base skip 1
+    (p , st) ← kompile-fold $ ks [ n ] base skip ε 1
+    --let p = KS.defs st ⊕ p
     q ← quoteTC p
     unify hole q
-
-  -- For debugging purposes.
-  frefl : Name → List Name → Term → TC ⊤
-  frefl f base-funs a = do
-
-     ty ← getType f
-     ty ← withReconstructed $ dontReduceDefs base-funs $ normalise ty
-     te ← withReconstructed $ getDefinition f >>= λ where
-           (function cs) → return $ pat-lam cs []
-           _ → return unknown
-     te ← pat-lam-norm te base-funs
-     q ← quoteTC te
-     unify a q
-
-  fty : Name → List Name → Term → TC ⊤
-  fty f base-funs a = do
-     ty ← getType f
-     ty ← withReconstructed $ dontReduceDefs base-funs $ normalise ty
-     q ← quoteTC ty
-     unify a q
-
--- This function normalises inside of the clauses of the
--- function.  The main usecase is to push the rewriting
--- rules in the body of the function prior to extraction.
-pat-lam-norm (pat-lam cs args) base-funs = do
-  cs ← hlpr cs
-  return $ pat-lam cs args
-  where
-    hlpr : List Clause → TC $ List Clause
-    hlpr [] = return []
-    hlpr (clause tel ps t ∷ l) = do
-      let ctx = reverse $ L.map proj₂ tel
-      t ← dontReduceDefs base-funs
-          $ inContext ctx
-          $ withReconstructed
-          $ normalise t
-      l ← hlpr l
-      return $ clause tel ps t ∷ l
-    hlpr (absurd-clause tel ps ∷ l) = do
-      l ← hlpr l
-      return $ absurd-clause tel ps ∷ l
-pat-lam-norm t _ = return t
 
 
 -- Traverse through the list of the functions we need to extract
 -- and collect all the definitions.
 kompile-fold = do
-    s@(ks fs ba done c) ← R.get
+    s@(ks fs ba done _ c) ← R.get
     case fs of λ where
       []       → return ε
       (f ∷ fs) → case list-has-el (f RN.≟_) done of λ where
@@ -109,14 +71,20 @@ kompile-fold = do
             unknown →
               return $ error $ "kompile: attempting to compile `" ++ showName f ++ "` as function"
             _ → do
-                R.put (ks fs ba (f ∷ done) c)
+                R.put (ks fs ba (f ∷ done) ε c)
                 -- Compile the function and make an error more specific in
                 -- case compilation fails.
-                q ← lift-mstate {RM = monadTC} $ kompile-fun ty te f
-                let q = err-modify q λ x → "in function " ++ showName f ++ ": " ++ x
+                (ok q) ← lift-mstate {RM = monadTC} $ kompile-fun ty te f
+                  where (error x) → return $ error $ "in function " ++ showName f ++ ": " ++ x
+                defs ← KS.defs <$> R.get
+                let q = defs ⊕ q
+                   --R.modify $! λ k → record k{ defs = ε }
+                kst ← R.get
+                  --let q = KS.defs kst ⊕ q
+                R.put $! record kst{ defs = ε }
                 -- Do the rest of the functions
                 p ← kompile-fold
-                return $ p ⊕ "\n\n" ⊕ q
+                return $! p ⊕ "\n\n" ⊕ q
   where
     module R = RawMonadState (StateTMonadState KS monadTC)
 

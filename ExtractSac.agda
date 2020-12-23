@@ -5,6 +5,7 @@ module ExtractSac where
 open import Data.String as S hiding (_++_) renaming (_≟_ to _≟s_)
 open import Data.List as L hiding (_++_)
 open import Data.List.Categorical
+open import Data.List.Properties as L
 open import Data.Nat as N
 open import Agda.Builtin.Nat using (div-helper; mod-helper)
 
@@ -13,27 +14,31 @@ open import Data.Nat.Show renaming (show to showNat)
 open import Data.Product as Σ hiding (map)
 open import Data.Sum hiding (map)
 open import Data.Vec as V using (Vec; [] ; _∷_)
-open import Data.Char renaming (_≈?_ to _c≈?_)
+open import Data.Char using (Char) renaming (_≈?_ to _c≈?_)
 open import Data.Bool
 open import Data.Fin as F using (Fin; zero; suc; inject₁; fromℕ<; #_)
-open import Data.Maybe using (Maybe; just; nothing)
+open import Data.Maybe as M using (Maybe; just; nothing)
+open import Data.Unit
 
 open import Category.Monad
 open import Category.Monad.State
 
-open import Relation.Binary.PropositionalEquality hiding ([_])
+open import Relation.Binary.PropositionalEquality as Eq hiding ([_])
 open import Relation.Nullary
 open import Relation.Nullary.Decidable hiding (map)
 
 open import Reflection hiding (return; _>>=_; _>>_)
 open import Reflection.Term
 import      Reflection.Name as RN
+open import Reflection.Annotated
+open import Reflection.Universe
+open import Reflection.Annotated.Free
 
 open import Function
 
 open import Array.Base
 open import Array.Properties
-open import APL2 using (reduce-1d)
+open import APL2 using (reduce-1d; _↑_; _↓_; ▴_; ▾_; _-↑⟨_⟩_; _↑⟨_⟩_)
 
 open import Agda.Builtin.Float
 
@@ -42,9 +47,10 @@ open RawMonad ⦃ ... ⦄
 
 -- Glorified sigma type for variable-type pairs
 record VarTy : Set where
-  constructor _∈_
+  constructor _∈_~_
   field v : String
-        t : Err SacTy
+        s : Err SacTy
+        t : Arg Type
 
 -- Glorified sigma type for variable-assertion pairs
 record Assrt : Set where
@@ -104,6 +110,7 @@ record PatSt : Set where
 defaultPatSt : PatSt
 defaultPatSt = mk [] [] [] 1
 
+
 SPS = State PS
 
 -- The main function kit to extract sac functions.
@@ -112,7 +119,7 @@ kompile-pi     : Type → SPS (Err SacTy) --Prog
 kompile-cls    : Clauses → (vars : Strings) → (ret : String) → SKS Prog
 kompile-clpats : Telescope → (pats : List $ Arg Pattern) → (vars : Strings) → PatSt → Err PatSt
 {-# TERMINATING #-}
-kompile-term   : Term → (varctx : Strings) → SKS Prog
+kompile-term   : Term → {- (varctx : Strings) -} {- List VarTy -} Telescope → SKS Prog
 
 
 -- Normalise the name of the symbols (functions, constructors, ...)
@@ -158,12 +165,13 @@ kompile-fun ty (pat-lam cs []) n = do
       rt = validate-ty rt
       rv = PS.ret ps
       ns = showName n
-      args = ok ", " ++/ L.map (λ where (v ∈ t) → validate-ty t ⊕ " " ⊕ v) (PS.ctx ps)
+      args = ok ", " ++/ L.map (λ where (v ∈ t ~ _) → validate-ty t ⊕ " " ⊕ v) (PS.ctx ps)
       ret-assrts = list-filter (λ where (mk v _) → v ≈? rv) $ PS.assrts ps
       arg-assrts = list-filter (dec-neg λ where (mk v _) → v ≈? rv) $ PS.assrts ps
       assrt-to-code = ("/* " ++_) ∘ (_++ " */") ∘ Assrt.a
   R.put $ PS.kst ps
-  b ← kompile-cls cs (L.map (λ where (v ∈ _) → v) $ PS.ctx ps) rv
+  --b ← if does (showName n S.≟ "Example-02.testn") then kompile-cls cs (L.map (λ where (v ∈ _ ~ _) → v) $ PS.ctx ps) rv else (return $ ok "XX")
+  b ← kompile-cls cs (L.map (λ where (v ∈ _ ~ _) → v) $ PS.ctx ps) rv
   return $ "// Function " ⊕ ns ⊕ "\n"
          ⊕ rt ⊕ "\n"
          ⊕ nnorm ns ⊕ "(" ⊕ args ⊕ ") {\n"
@@ -206,7 +214,7 @@ private
   sps-kompile-term : Term → SPS Prog
   sps-kompile-term t = do
     ps ← P.get
-    lift-ks $ kompile-term t (L.map (λ where (v ∈ _) → v) $ PS.ctx ps)
+    lift-ks $ kompile-term t $ (L.map (λ where (v ∈ _ ~ t) → (v , t)) $ PS.ctx ps)
 
 
 kompile-ty : Type → (pi-ok : Bool) → SPS (Err SacTy)
@@ -217,7 +225,7 @@ kompile-ty (Π[ s ∶ arg i x ] y) true  = do
     (ok t) ← kompile-ty x false
       where e → return e
     P.modify λ k → record k { cur = PS.ret k  -- In case this is a return type
-                            ; ctx = PS.ctx k ++ [ v ∈ ok t ] }
+                            ; ctx = PS.ctx k ++ [ v ∈ ok t ~ arg i x ] }
     kompile-ty y true
 
 kompile-ty (con c args) pi-ok =
@@ -279,7 +287,7 @@ kompile-ty (def (quote Ar) (_ ∷ arg _ el-ty ∷ arg _ dim ∷ arg _ sh ∷ [])
     }
   case dim of λ where
     -- XXX can we possibly miss on any constant expressions?
-                     -- FIXME consider AKS case here!
+    -- FIXME consider AKS case here!
     (lit (nat d′)) → return $ ok $ akd hom τ (ok s) d′
     _ → return $ ok $ aud hom τ (ok s)
 
@@ -309,6 +317,17 @@ kompile-ty (def (quote _≥a_) (_ ∷ _ ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
   v ← PS.cur <$> P.get
   P.modify $ _p+=a (mk v $′ "assert (" ++ x ++ " >= " ++ y ++ ")")
   return $ ok unit
+
+kompile-ty (def (quote _<a_) (_ ∷ _ ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
+  ok x ← sps-kompile-term x where error x → ke x
+  ok y ← sps-kompile-term y where error x → ke x
+  v ← PS.cur <$> P.get
+  P.modify $ _p+=a (mk v $′ "assert (" ++ x ++ " < " ++ y ++ ")")
+  return $ ok unit
+
+kompile-ty (def (quote Dec) (_ ∷ arg _ p ∷ [])) _ = do
+  _ ← kompile-ty p false
+  return $ ok bool
 
 
 
@@ -389,26 +408,35 @@ private
     test₄ = refl
 
 
+kompile-tel : Telescope → SPS (Err ⊤)
+kompile-tel [] = return $ ok tt
+kompile-tel ((v , t@(arg i x)) ∷ tel) = do
+  --(ok τ) ← kompile-ty x false where (error x) → return $ error x
+  P.modify λ k → record k{ ctx = PS.ctx k ++ [ v ∈ error "?" ~ t ] }
+  kompile-tel tel
+
+
 kompile-cls [] ctx ret = kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
-  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
-  let (mk vars assgns _ _) = pst
-  perm tel vars >>=e λ vars → do
-    t ← kompile-term t vars
-    let as = "\n" ++/ assgns
-    return $ as ⊕ "\n"
-          ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+  -- Make telscope names unique.
+  let tel = (tel-rename $! tel) $! [] in
+  kompile-clpats tel ps ctx defaultPatSt >>=e λ pst → do
+  let (mk vars assgns _ _) = pst --in
+  t ← kompile-term t $! tel
+  let as = "\n" ++/ assgns
+  return $ as ⊕ "\n"
+      ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
 
 kompile-cls (absurd-clause tel ps ∷ []) ctx ret =
   -- Exactly the same as above
   -- We don't really need to make this call, but we keep it
   -- for sanity checks.  I.e. if we'll get an error in the
   -- patterns, it will bubble up to the caller.
-  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats ((tel-rename $! tel) $! []) ps ctx defaultPatSt >>=e λ pst → do
   return $ ok "unreachable ();"
 
 kompile-cls (absurd-clause tel ps ∷ ts@(_ ∷ _)) ctx ret =
-  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats ((tel-rename $! tel) $! []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars _ conds _) = pst
       cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
   r ← kompile-cls ts ctx ret
@@ -419,19 +447,18 @@ kompile-cls (absurd-clause tel ps ∷ ts@(_ ∷ _)) ctx ret =
          ⊕ "}\n"
 
 kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
-  kompile-clpats (tel-rename tel []) ps ctx defaultPatSt >>=e λ pst → do
+  kompile-clpats ((tel-rename $! tel) $! []) ps ctx defaultPatSt >>=e λ pst → do
   let (mk vars assgns conds _) = pst
       cs = " && " ++/ (if L.length conds N.≡ᵇ 0 then [ "true" ] else conds)
       as = "\n" ++/ assgns
-  perm tel vars >>=e λ vars → do
-    t ← kompile-term t vars
-    r ← kompile-cls ts ctx ret
-    return $ "if (" ⊕ cs ⊕ ") {\n"
-           ⊕ as ⊕ "\n"
-           ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
-           ⊕ "} else {\n"
-           ⊕ r ⊕ "\n"
-           ⊕ "}\n"
+  t ← kompile-term t $! tel --telv --{!!} --PS.ctx ps
+  r ← kompile-cls ts ctx ret
+  return $ "if (" ⊕ cs ⊕ ") {\n"
+         ⊕ as ⊕ "\n"
+         ⊕ ret ⊕ " = " ⊕ t ⊕ ";\n"
+         ⊕ "} else {\n"
+         ⊕ r ⊕ "\n"
+         ⊕ "}\n"
 
 
 
@@ -518,12 +545,20 @@ kompile-clpats tel (arg i (con (quote imap) (arg _ (dot _) ∷ [])) ∷ l) (v �
   kompile-clpats tel l ctx $ pst
 
 kompile-clpats tel (arg i (con (quote imap) (arg _ (absurd _) ∷ [])) ∷ l) (v ∷ ctx) pst =
-  kcp "absurd pattern as an argument to imap (it wasn't possible in 2020)"
+  kcp "don't know how to handle absurd pattern as an argument to imap"
 
 
 kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
   -- No constraints, as there could only be a single value.
   kompile-clpats tel l ctx pst
+
+kompile-clpats tel (arg i (con (quote _because_) ps) ∷ l) (v ∷ ctx) pst = do
+  pf , pst ← pst-fresh pst $ "pf_"
+  kompile-clpats tel (ps ++ l) (v ∷ pf ∷ ctx) pst
+kompile-clpats tel (arg i (con (quote Reflects.ofʸ) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) ("true" ∷ ctx) pst
+kompile-clpats tel (arg i (con (quote Reflects.ofⁿ) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) ("false" ∷ ctx) pst
 
 -- End of constructors here.
 
@@ -576,10 +611,15 @@ private
     R.modify λ k → record k{ cnt = 1 + KS.cnt k }
     return $ x ++ showNat (KS.cnt ps)
 
-var-lookup : Strings → ℕ → SKS Prog
+var-lookup : List VarTy → ℕ → SKS Prog
 var-lookup []       _       = kt "Variable lookup failed"
-var-lookup (x ∷ xs) zero    = return $ ok x
+var-lookup (v ∈ _ ~ _ ∷ xs) zero    = return $ ok v
 var-lookup (x ∷ xs) (suc n) = var-lookup xs n
+
+vty-lookup : List VarTy → ℕ → Err (VarTy)
+vty-lookup []       _       = error "Variable lookup failed"
+vty-lookup (x ∷ xs) zero    = ok x
+vty-lookup (x ∷ xs) (suc n) = vty-lookup xs n
 
 
 mk-mask : (n : ℕ) → List $ Fin n
@@ -594,6 +634,9 @@ mk-mask (suc n) = L.reverse $ go n (suc n) N.≤-refl
     go 0       (suc _) _  = zero ∷ []
     go (suc m) n       pf = F.fromℕ< pf ∷ go m n (sa<b⇒a<b m n pf)
 
+
+te-to-lvt : Telescope → List VarTy
+te-to-lvt tel = L.map (λ where (v , t) → v ∈ error "?" ~ t) tel
 
 -- TODO lift it up
 SAC-funs : List (Name × String)
@@ -619,7 +662,7 @@ private
     test-mk-mask₃ : mk-mask 2 ≡ # 0 ∷ # 1 ∷ []
     test-mk-mask₃ = refl
 
-kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → List String → SKS Prog
+kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → Telescope → SKS Prog
 kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
 ... | yes p | vargs rewrite p = do
                  l ← mapM (λ where (arg _ x) → kompile-term x varctx)
@@ -629,13 +672,12 @@ kompile-arglist n args mask varctx with L.length args N.≟ n | V.fromList args
 
 ... | no ¬p | _ = kt "Incorrect argument mask"
 
-kompile-term (var x []) vars = do
-  (ok t) ← var-lookup (reverse vars) x
-    where _ → kt $ "var-lookup failed, var = " ++ showNat x ++ " vars = " ++ (", " ++/ vars)
-  return $ ok t
+kompile-term (var x []) vars =
+  return $ tel-lookup-name vars x
+
 kompile-term (var x args@(_ ∷ _)) vars = do
-  f ← var-lookup (reverse vars) x
-  let l = L.length args
+  let f = tel-lookup-name vars x
+      l = L.length args
   args ← kompile-arglist l args (mk-mask l) vars
   return $ f ⊕ "(" ⊕ args ⊕ ")"
 
@@ -660,7 +702,7 @@ kompile-term (con (quote L.List.[]) (_ ∷ (arg _ ty) ∷ [])) vars = do
   -- types in the context, we only refer to variables, therefore the
   -- following hack is justified.
   kst ← R.get
-  let ctx = L.map (λ v → v ∈ error "?") vars
+  let ctx = L.map (λ where (v , t) → v ∈ error "?" ~ t) $ vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
   --R.put (PS.kst ps)
@@ -673,11 +715,11 @@ kompile-term (con (quote L.List._∷_) args) vars = do
 -- Almost the same as List
 kompile-term (con (quote V.Vec.[]) (_ ∷ (arg _ ty) ∷ [])) vars = do
   kst ← R.get
-  let ctx = L.map (λ v → v ∈ error "?") vars
+  let ctx = L.map (λ where (v , t) → v ∈ error "?" ~ t) $ vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
-  --R.put (PS.kst ps)
-  return $ "empty (" ⊕ in-sh ⊕ ")" --ok "[]"
+  R.put (PS.kst ps)
+  return $ "empty (" ⊕ in-sh ⊕ ")"
 
 kompile-term (con (quote V.Vec._∷_) args) vars = do
   args ← kompile-arglist 5 args (# 3 ∷ # 4 ∷ []) vars
@@ -697,26 +739,27 @@ kompile-term (con (quote refl) _) _ =
 
 
 -- Imaps with explicit lambdas
-kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ arg _ (vLam x e) ∷ [])) vars = do
+kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ arg _ d ∷ X@(arg _ s) ∷ arg _ (vLam x e) ∷ [])) vars = do
   kst ← R.get
-  let ctx = L.map (λ v → v ∈ error "?") vars
+  let ctx = L.map (λ where (v , t) → v ∈ error "?" ~ t) $ vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
       bt = bt <$> rt
-  --R.put (PS.kst ps)
+  R.put (PS.kst ps)
   iv ← kt-fresh "iv_"
+  let iv-type = vArg (def (quote Ix) ((vArg d) ∷ vArg s ∷ []))
   s ← kompile-term s vars
-  b ← kompile-term e $ vars ++ [ iv ]
-  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray (" ⊕ s ⊕ ", zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
+  b ← kompile-term e $! vars ++ [ (iv , iv-type) ]
+  return $! "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray (" ⊕ s ⊕ ", zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
 
 -- Imaps with an expression
 kompile-term (con (quote Array.Base.imap) (_ ∷ arg _ ty ∷ _ ∷ arg _ s ∷ arg _ e ∷ [])) vars = do
   kst ← R.get
-  let ctx = L.map (λ v → v ∈ error "?") vars
+  let ctx = L.map (λ where (v , t) → v ∈ error "?" ~ t) $ vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
       bt = bt <$> rt
-  --R.put (PS.kst ps)
+  R.put (PS.kst ps)
   iv ← kt-fresh "iv_"
   s ← kompile-term s vars
   b ← kompile-term e $ vars
@@ -735,23 +778,35 @@ kompile-term (def (quote div-helper) (arg _ k ∷ arg _ m ∷ arg _ n ∷ arg _ 
   j ← kompile-term j vars
   return $ "_div_SxS_ (" ⊕ k ⊕ " + (" ⊕ n ⊕ " + " ⊕ m ⊕ " - " ⊕ j ⊕ "), 1 + " ⊕ m ⊕ ")"
 
+kompile-term (def (quote N._≟_) (arg _ a ∷ arg _ b ∷ [])) vars = do
+  a ← kompile-term a vars
+  b ← kompile-term b vars
+  return $ a ⊕ " == " ⊕  b
+
 kompile-term (def (quote V._++_) args) vars = do
   args ← kompile-arglist 6 args (# 4 ∷ # 5 ∷ []) vars
   return $ "concat (" ⊕ args ⊕ ")"
 
 
-kompile-term (def (quote V.tabulate) (_ ∷ arg _ ty ∷ arg _ l ∷ arg _ (vLam x e) ∷ [])) vars = do
+kompile-term (def (quote V.tabulate) (_ ∷ arg _ ty ∷ X@(arg _ l) ∷ arg _ (vLam x e) ∷ [])) vars = do
   kst ← R.get
-  let ctx = L.map (λ v → v ∈ error "?") vars
+  let ctx = te-to-lvt vars --L.map (λ where (v , t) → v ∈ error "?" ~ t) $ TelView.tel vars
       (rt , ps) = kompile-ty ty false $ record defaultPS{ kst = kst; ctx = ctx }
       in-sh = sacty-shape =<< rt
       bt = bt <$> rt
-  --R.put (PS.kst ps)
+  R.put (PS.kst ps)
   iv ← kt-fresh "iv_"
+  let iv-type = vArg (def (quote Fin) (vArg l ∷ []))
   l ← kompile-term l vars
-  b ← kompile-term e $ vars ++ [ iv ]
+  b ← kompile-term e $ vars ++ [(iv , iv-type)]
   return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray ([" ⊕ l ⊕ "], zero_" ⊕ bt ⊕ " (" ⊕ in-sh ⊕ "))"
 
+kompile-term (def (quote ix-tabulate) (arg _ d ∷ X ∷ arg _ (vLam x e) ∷ [])) vars = do
+  iv ← kt-fresh "iv_"
+  let iv-type = vArg (def (quote Fin) (vArg d ∷ []))
+  d ← kompile-term d vars
+  b ← kompile-term e $ vars ++ [(iv , iv-type)]
+  return $ "with { (. <= " ⊕ iv ⊕ " <= .): " ⊕ b ⊕ "; }: genarray ([" ⊕ d ⊕ "], 0)"
 
 -- Array stuff
 kompile-term (def (quote sel) (_ ∷ _ ∷ _ ∷ _ ∷ arg _ a ∷ arg _ iv ∷ [])) vars = do
@@ -769,31 +824,98 @@ kompile-term (def (quote V.lookup) (_ ∷ _ ∷ _ ∷ arg _ v ∷ arg _ i ∷ []
   i ← kompile-term i vars
   return $ v ⊕ "[" ⊕ i ⊕ "]"
 
---kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ arg _ s ∷ arg _ (def f args) ∷ arg _ ε ∷ arg _ a ∷ [])) vars = do
---  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
---            (just (_ , f)) → f
---            _ → nnorm $ showName f
---  ε ← kompile-term ε vars
---  a ← kompile-term a vars
---  s ← kompile-term s vars
---  iv ← kt-fresh "iv_"
---  return $ "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ a ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ ε ⊕ ")"
+kompile-term (def (quote V.foldr) (_ ∷ _ ∷ ty₁ ∷ arg _ (vLam _ ty₂) ∷ arg _ len ∷ arg _ (hLam _ (def f args)) ∷ arg _ neut ∷ arg _ arr ∷ [])) vars = do
+  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
+            (just (_ , f)) → f
+            _ → nnorm $ showName f
+  len ← kompile-term len vars
+  neut ← kompile-term neut vars
+  arr ← kompile-term arr vars
+  iv ← kt-fresh "iv_"
+  return $ "with { ([0] <= " ⊕ iv ⊕ " < [" ⊕ len ⊕ "]): " ⊕ arr ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ neut ⊕ ")"
 
---kompile-term (def (quote reduce-1d) _) vars =
-kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ _ ∷ arg _ a ∷ _)) vars =
-  -- FIXME try to automate this.
-  let aa = S.fromList $ L.take 200 $ S.toList $ showTerm a in
-  kt $ "cannot handle `reduce-1d` with non-symbolic function, please lift it into definition a = " ++ aa
+
+kompile-term (def (quote reduce-1d) (_ ∷ _ ∷ arg _ s ∷ arg _ (def f args) ∷ arg _ ε ∷ arg _ a ∷ [])) vars = do
+  let f = case list-find-el ((RN._≟ f) ∘ proj₁) SAC-funs of λ where
+            (just (_ , f)) → f
+            _ → nnorm $ showName f
+  ε ← kompile-term ε vars
+  a ← kompile-term a vars
+  s ← kompile-term s vars
+  iv ← kt-fresh "iv_"
+  return $ "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ a ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ f ⊕ ", " ⊕ ε ⊕ ")"
+
+kompile-term (def (quote reduce-1d) (Xa@(arg _ X) ∷ Ya@(arg _ Y) ∷ arg _ s ∷ arg _ L@(vLam a (vLam b e)) ∷ arg _ ε ∷ arg _ arr ∷ [])) vars = do
+  a ← kt-fresh "a"
+  b ← kt-fresh "b"
+
+  kst ← R.get
+  let (Xs , ps) = kompile-ty X false $ record defaultPS{ kst = kst; ctx = te-to-lvt vars }
+      (Ys , ps) = kompile-ty Y false $ record ps { ctx = PS.ctx ps ++ [ a ∈ Xs ~ Xa ] }
+  R.put $ PS.kst ps
+  t ← kompile-term e $ vars ++ (a , Xa) ∷ (b , Ya) ∷ [] -- (PS.ctx ps ++ [ b ∈ Ys ~ Ya ])
+
+  kst ← R.get
+  fname ← kt-fresh "lifted_"
+  let e , ps = kompile-ctx vars $ record defaultPS{ kst = kst }
+      vs     = L.map {B = String × Prog} (λ where (v ∈ τ ~ _) → (v , (sacty-to-string <$> τ))) $′ PS.ctx ps
+      vs     = vs ++ ((a , (sacty-to-string <$> Xs)) ∷ (b , (sacty-to-string <$> Ys)) ∷ [])
+      vs     = ok ", " ++/ L.map (λ where (v , τ) → τ ⊕ " " ⊕ v) vs
+      fun    = (sacty-to-string <$> Ys) ⊕ " " ⊕ fname ⊕ "(" ⊕ vs ⊕ ") "
+             ⊕ "{ return " ⊕ t ⊕ "; }"
+
+  -- error out in case our current context was broken
+  (ok _) ← return e where (error x) → return (error x)
+
+  --R.modify $! λ k → record k{ defs = (KS.defs k ⊕_) $! fun }
+  kst ← R.get
+  R.put $! record kst{ defs = KS.defs kst ⊕ fun }
+
+  let part-app = fname ⊕ "(" ⊕ ", " ++/ L.map proj₁ vars ⊕ ")"
+  ε ← kompile-term ε vars
+  arr ← kompile-term arr vars
+  s ← kompile-term s vars
+  iv ← kt-fresh "iv_"
+  return $! "with { ([0] <= " ⊕ iv ⊕ " < " ⊕ s ⊕ "): " ⊕ arr ⊕ "[" ⊕ iv ⊕ "]; }: fold (" ⊕ part-app ⊕ ", " ⊕ ε ⊕ ")"
+
+  where
+    kompile-ctx : Telescope → SPS (Err ⊤)
+    kompile-ctx [] = return $ ok tt
+    kompile-ctx ((v , t@(arg i x)) ∷ ctx) = do
+      (ok τ) ← kompile-ty x false where (error x) → return $ error x
+      P.modify λ k → record k{ ctx = PS.ctx k ++ [ v ∈ ok τ ~ t ] }
+      kompile-ctx ctx
 
 -- A bunch of functions that are mapped to id in sac
+-- XXX get rid of id call, only keeping for debugging purposes.
 kompile-term (def (quote F.fromℕ<) args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 3 args (# 0 ∷ []) vars
 kompile-term (def (quote F.toℕ)    args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (# 1 ∷ []) vars
---... | "Array.Base.subst-ix" = okl "id (" #p comp-arglistx 5 args (# 4 ∷ []) vars #p okl ")"
---... | "Array.Base.subst-ar" = okl "id (" #p comp-arglistx 7 args (# 6 ∷ []) vars #p okl ")"
---... | "Array.Properties.a→ix" = okl "id (" #p comp-arglistx 4 args (# 1 ∷ []) vars #p okl ")"
---... | "Array.Base.a→s" = okl "id (" #p comp-arglistx 2 args (# 1 ∷ []) vars #p okl ")"
+kompile-term (def (quote subst-ar) args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 7 args (# 6 ∷ []) vars
+kompile-term (def (quote subst-ix) args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 5 args (# 4 ∷ []) vars
+kompile-term (def (quote ▾_)       args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 6 args (# 5 ∷ []) vars
+kompile-term (def (quote ▴_)       args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 6 args (# 5 ∷ []) vars
+kompile-term (def (quote a→ix)     args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 4 args (# 1 ∷ []) vars
+kompile-term (def (quote a→s)      args) vars = ("id (" ⊕_) ∘ (_⊕ ")") <$> kompile-arglist 2 args (# 1 ∷ []) vars
 
 
+kompile-term (def (quote Array.Base.magic-fin) args) vars = return $ ok "unreachable ()"
+
+kompile-term (def (quote Array.Base.off→idx) args) vars = do
+  args ← kompile-arglist 3 args (# 1 ∷ # 2 ∷ []) vars
+  return $ "off_to_idx (" ⊕ args ⊕ ")"
+kompile-term (def (quote _↑_) args) vars = do
+  args ← kompile-arglist 7 args (# 4 ∷ # 5 ∷ []) vars
+  return $ "take (" ⊕ args ⊕ ")"
+kompile-term (def (quote _↓_) args) vars = do
+  args ← kompile-arglist 7 args (# 4 ∷ # 5 ∷ []) vars
+  return $ "drop (" ⊕ args ⊕ ")"
+
+kompile-term (def (quote _↑⟨_⟩_) args) vars = do
+  args ← kompile-arglist 7 args (# 4 ∷ # 5 ∷ # 6 ∷ []) vars
+  return $ "overtake (" ⊕ args ⊕ ")"
+kompile-term (def (quote _-↑⟨_⟩_) args) vars = do
+  args ← kompile-arglist 7 args (# 4 ∷ # 5 ∷ # 6 ∷ []) vars
+  return $ "overtake_back (" ⊕ args ⊕ ")"
 
 -- The last pattern in the list of `def` matches
 kompile-term (def n []) _ =
@@ -805,7 +927,7 @@ kompile-term (def n args@(_ ∷ _)) vars with list-find-el ((RN._≟ n) ∘ proj
   args ← kompile-arglist l args (mk-mask l) vars
   return $ f ⊕ " (" ⊕ args ⊕ ")"
 
-... | nothing = do
+... | nothing  = do
   R.modify λ k → record k { funs = KS.funs k ++ [ n ] }
   let n = nnorm $ showName n
       l = L.length args

@@ -1,4 +1,4 @@
-open import Data.Nat as N using (ℕ; zero; suc)
+open import Data.Nat as N using (ℕ; zero; suc; _<_; _≤_; _>_; z≤n; s≤s; _∸_)
 open import Data.Nat.Properties as N
 open import Data.Vec as V using (Vec; []; _∷_)
 open import Data.Vec.Properties as V
@@ -584,23 +584,37 @@ ax+sh<s (imap ax) (imap sh) (imap s) s≥sh ax<s-sh iv =
       ax+sh<s-sh+sh = +-monoˡ-< (sh iv) (ax<s-sh iv)
       s-sh+sh≡s     = m∸n+n≡m (s≥sh iv)
     in a<b⇒b≡c⇒a<c ax+sh<s-sh+sh s-sh+sh≡s
-
-
+{-
 _↑_ : ∀ {a}{X : Set a}{n s}
     → (sh : Ar ℕ 1 (n ∷ []))
     → (a : Ar X n s)
     → {pf : s→a s ≥a sh}
     → Ar X n $ a→s sh
 _↑_ {s = s} sh       (imap f) {pf}   with (prod $ a→s sh) N.≟ 0
-_↑_ {s = s} sh       (imap f) {pf} | yes Πsh≡0 = mkempty _ Πsh≡0
-_↑_ {s = s} (imap q) (imap f) {pf} | no  Πsh≢0 = imap mtake
+_↑_ {s = s} sh       (imap f) {pf} | yes Πsh≡0 = imap λ iv → magic-fin $ Πs≡0⇒Fin0 _ iv Πsh≡0 --mkempty _ Πsh≡0
+_↑_ {s = s} (imap q) (imap f) {pf} | no  Πsh≢0 = imap λ iv → {- mtake
   where
     mtake : _
-    mtake iv = let
+    mtake iv = -} let
                   ai , ai< = ix→a iv
                   ix<q jv = a<b⇒b≡c⇒a<c (ai< jv) (s→a∘a→s (imap q) jv)
                   ix = a→ix ai (s→a s) λ jv → ≤-trans (ix<q jv) (pf jv)
                in f (subst-ix (a→s∘s→a s) ix)
+-}
+{- -}
+_↑_ : ∀ {a}{X : Set a}{n s}
+    → (sh : Ar ℕ 1 (n ∷ []))
+    → (a : Ar X n s)
+    → {pf : s→a s ≥a sh}
+    → Ar X n $ a→s sh
+_↑_ {s = s} sh       (imap f) {pf} = case (prod $ a→s sh) N.≟ 0 of λ where
+        (yes Πsh≡0) → imap λ iv → magic-fin $ Πs≡0⇒Fin0 _ iv Πsh≡0
+        (no  Πsh≢0) → imap λ iv → let
+                  ai , ai< = ix→a iv
+                  ix<q jv = a<b⇒b≡c⇒a<c (ai< jv) (s→a∘a→s sh jv)
+                  ix = a→ix ai (s→a s) λ jv → ≤-trans (ix<q jv) (pf jv)
+               in f (subst-ix (a→s∘s→a s) ix)
+{- -}
 
 
 _↓_ : ∀ {a}{X : Set a}{n s}
@@ -627,9 +641,120 @@ _↓_ {s = s} (imap q) (imap f) {pf} | no  Π≢0 = imap mkdrop
 
 
 
+∸-monoˡ-< : ∀ {m n o} → m < n → o ≤ m → m ∸ o < n ∸ o
+∸-monoˡ-< {o = zero}  m<n o≤m = m<n
+∸-monoˡ-< {suc m} {o = suc o} (s≤s m<n) (s≤s o≤m) = ∸-monoˡ-< m<n o≤m
+
+a+b-a≡a : ∀ {n} {s₁ : Vec ℕ n} {s : Ix 1 (n ∷ []) → ℕ}
+             {jv : Ix 1 (n ∷ [])} →
+           V.lookup (V.tabulate (λ i → s (i ∷ []) N.+ V.lookup s₁ i))
+           (ix-lookup jv zero)
+           ∸ s jv
+           ≡ V.lookup s₁ (ix-lookup jv zero)
+a+b-a≡a {zero} {[]} {s} {x ∷ []} = magic-fin x
+a+b-a≡a {suc n} {x ∷ s₁} {s} {zero ∷ []} = m+n∸m≡n (s (zero ∷ [])) x
+a+b-a≡a {suc n} {x ∷ s₁} {s} {suc j ∷ []} = a+b-a≡a {s₁ = s₁} {s = λ { (j ∷ []) → s (suc j ∷ [])}} {jv = j ∷ []}
+
+pre-pad : ∀ {a}{X : Set a}{n}{s₁ : Vec ℕ n}
+        → (sh : Ar ℕ 1 (n ∷ []))
+        → X
+        → (a : Ar X n s₁)
+        → Ar X n (a→s $ sh + ρ a)
+pre-pad {s₁ = s₁} (imap s) e (imap f) = imap body
+  where
+    body : _
+    body iv = let ix , ix<s = ix→a iv
+              in case ix ≥a? (imap s) of λ where
+                   (yes p) → let
+                      fx = (ix - (imap s)) {≥ = p}
+                      fv = a→ix fx (s→a s₁)
+                                λ jv → a<b⇒b≡c⇒a<c
+                                          (∸-monoˡ-< (ix<s jv) (p jv))
+                                          (a+b-a≡a {s₁ = s₁} {s = s} {jv = jv})
+                      in f (subst-ix (λ i → lookup∘tabulate _ i) fv)
+                   (no ¬p) → e
 
 
-_̈⟨_⟩_ : ∀ {a}{X Y Z : Set a}{n s} 
+
+b≤a⇒c<b⇒a-b+c<a : ∀ {a b c} → b ≤ a → c < b → a ∸ b N.+ c < a
+b≤a⇒c<b⇒a-b+c<a {suc a} {suc b} {zero}  b≤a c<b rewrite +-identityʳ (a ∸ b) = s≤s (m∸n≤m a b)
+b≤a⇒c<b⇒a-b+c<a {suc a} {suc b} {suc c} (s≤s b≤a) (s≤s c<b) = let q = b≤a⇒c<b⇒a-b+c<a b≤a c<b
+                                                              in subst₂ _<_ (sym $ +-suc (a ∸ b) c) refl $ +-monoʳ-< 1 q
+
+
+[a+b≥c]⇒b<c⇒a+b-c<a : ∀ {a b c} → a N.+ b N.≥ c → b < c → a N.+ b ∸ c < a
+[a+b≥c]⇒b<c⇒a+b-c<a {a}{b}{c} a+b≥c b<c = let a+b<a+c = +-monoʳ-< a b<c
+                                          in subst₂ _<_ refl (m+n∸n≡m _ c) $ ∸-monoˡ-< a+b<a+c a+b≥c
+
+{-
+_-↑⟨_⟩_ : ∀ {a}{X : Set a}{n}{s₁ : Vec ℕ n}
+        → (sh : Ar ℕ 1 (n ∷ []))
+        → X
+        → (a : Ar X n s₁)
+        → Ar X n (▾ sh)
+_-↑⟨_⟩_ {s₁ = s₁} s e a = imap λ iv → let
+                  ix , ix<s = ix→a iv
+                  in case ((ρ a) + ix) ≥a? s of λ where
+                             (yes p) → let
+                                 ov = (((ρ a) + ix) - s){p}
+                                 oi = a→ix ov (ρ a) λ { jv@(i ∷ []) → [a+b≥c]⇒b<c⇒a+b-c<a (p jv) (subst₂ _<_ refl (V.lookup∘tabulate _ i) $ ix<s jv) }
+                                in sel a (subst-ix (λ i → lookup∘tabulate _ i) oi)
+                             (no _) → e
+-}
+
+_-↑⟨_⟩_ : ∀ {a}{X : Set a}{n}{s₁ : Vec ℕ n}
+        → (sh : Ar ℕ 1 (n ∷ []))
+        → X
+        → (a : Ar X n s₁)
+        → Ar X n (▾ sh)
+_-↑⟨_⟩_ {s₁ = s₁} s e a = imap body
+  where
+    body : _
+    body iv with ix→a iv
+    ... | ix , ix<s with ((ρ a) + ix) ≥a? s
+    ... | (yes p) = let
+                      ov = (((ρ a) + ix) - s){p}
+                      oi = a→ix ov (ρ a) λ { jv@(i ∷ []) → [a+b≥c]⇒b<c⇒a+b-c<a (p jv) (subst₂ _<_ refl (V.lookup∘tabulate _ i) $ ix<s jv) }
+                    in sel a (subst-ix (λ i → lookup∘tabulate _ i) oi)
+    ... | _  = e
+
+{-
+_↑⟨_⟩_ : ∀ {a}{X : Set a}{n}{s : Vec ℕ n}
+      → (sh : Ar ℕ 1 (n ∷ []))
+      → X
+      → (a : Ar X n s)
+      → Ar X n (▾ sh)
+_↑⟨_⟩_ {s = s} (imap sh) e (imap a) = imap body
+  where
+    body : _
+    body iv = let ix , ix<s = ix→a iv
+              in case ix <a? (ρ imap a) of λ where
+                (yes p) → let
+                            av = a→ix ix (ρ imap a) p
+                          in a (subst-ix (λ i → lookup∘tabulate _ i) av)
+                (no ¬p) → e
+-}
+
+_↑⟨_⟩_ : ∀ {a}{X : Set a}{n}{s : Vec ℕ n}
+      → (sh : Ar ℕ 1 (n ∷ []))
+      → X
+      → (a : Ar X n s)
+      → Ar X n (▾ sh)
+_↑⟨_⟩_ {s = s} (imap sh) e (imap a) = imap body
+  where
+    body : _
+    body iv with ix→a iv
+    ... | ix , ix<s with ix <a? (ρ imap a)
+    ... | (yes p) = let
+                      av = a→ix ix (ρ imap a) p
+                    in a (subst-ix (λ i → lookup∘tabulate _ i) av)
+    ... | (no ¬p) = e
+
+
+
+
+
+_̈⟨_⟩_ : ∀ {a}{X Y Z : Set a}{n s}
      → Ar X n s
      → (X → Y → Z)
      → Ar Y n s → Ar Z n s
@@ -675,4 +800,5 @@ module test where
   -- This definition should fail, as sx ≠ sy (not necessarily)
   --test-fail : ∀ {n sx sy} → Ar ℕ n sx → Ar ℕ n sy → Ar ℕ n sy
   --test-fail x y = x + y
+
 

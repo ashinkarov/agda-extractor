@@ -125,13 +125,13 @@ module _ where
   -- Higher-order functions are not allowed:
   test-11f : ℕ → List (ℕ → ℕ)
   test-11f n = []
-  test₁₁ : kompile test-11f [] [] ≡ error _
+  test₁₁ : _≡_ {A = Prog} (kompile test-11f [] []) $ error _
   test₁₁ = refl
 
   -- Lists can bring per-element constraints, which we are currently
   -- generating with foreach macro.
   test-12f : (n : ℕ) → List (List $ Fin n) → ℕ
   test-12f n xs = 10
-  test₁₂ : kompile test-12f [] [] ≡ error _
+  test₁₂ : _≡_ {A = Prog} (kompile test-12f [] []) $ error _
   test₁₂ = refl
 

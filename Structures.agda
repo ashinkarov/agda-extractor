@@ -4,6 +4,8 @@ open import Data.Nat using (ℕ)
 open import Data.Product
 open import Data.Bool
 open import Data.Maybe
+open import Data.Vec as V using (Vec; []; _∷_)
+open import Data.Fin as F using (Fin; zero; suc)
 
 open import Reflection using (TC)
 open import Reflection.Name using (Names)
@@ -53,13 +55,13 @@ open RawMonoid {{...}} public
 instance
   monoidLst : ∀ {a}{A : Set a} → RawMonoid (List A)
   monoidLst {A = A} = record {
-    _++_ = Data.List._++_;
+    _++_ = λ a b → (Data.List._++_ $! a) $! b ;
     ε = []
     }
 
   monoidStr : RawMonoid String
   monoidStr = record {
-    _++_ = Data.String._++_;
+    _++_ = λ a b → (Data.String._++_ $! a) $! b;
     ε = ""
     }
 
@@ -97,9 +99,10 @@ record KS : Set where
   field funs : Names   -- Functions to compile
         base : Names   -- Atomic functions that we do not traverse into.
         done : Names   -- Functions that we have processed.
+        defs : Prog    -- Definitions such as lifted functions, function declarations, etc.
         cnt  : ℕ       -- Source of fresh variables
 
-defaultKS = ks [] [] [] 1
+defaultKS = ks [] [] [] ε 1
 
 SKS = State KS
 TCS = StateT KS TC
@@ -165,3 +168,12 @@ dec-neg :  ∀ {a b}{A : Set a}{P : UR.Pred A b} → UR.Decidable P → UR.Decid
 dec-neg P? x with P? x
 ... | yes p = no λ ¬p → contradiction p ¬p
 ... | no ¬p = yes ¬p
+
+
+vec-find-el-idx : ∀ {a b}{A : Set a}{n}{P : UR.Pred A b} → UR.Decidable P → Vec A n → Maybe (Fin n × A)
+vec-find-el-idx P? [] = nothing
+vec-find-el-idx P? (x ∷ xs) with P? x
+... | yes _ = just (zero , x)
+... | no  _ with vec-find-el-idx P? xs
+... | just (i , x′) = just (suc i , x′)
+... | nothing = nothing

@@ -1,3 +1,4 @@
+{-# OPTIONS --show-implicit --verbose=tc.reconstruct:50 #-}
 open import ExtractSac as ES using ()
 open import Extract (ES.kompile-fun)
 
@@ -11,13 +12,16 @@ open import Relation.Binary.PropositionalEquality
 open import Reflection
 
 open import Structures
+open import ReflHelper
 open import Function
 
 open import Array.Base
 
+
 -- Check that Vec² and List ∘ Vec are treated correctly.
 -- Here we transpose a 2d array using Vec operations.
 -- Note that we are using local where-defined functions.
+
 test-20f : ∀ m n → Vec (Vec ℕ n) m → Vec (Vec ℕ m) n
 test-20f 0       n []       = repl []
   where
@@ -33,12 +37,26 @@ test-20f (suc _) n (x ∷ xs) = xzip x (test-20f _ n xs)
 test₂₀ : kompile test-20f [] [] ≡ ok _
 test₂₀ = refl
 
+-- simplified version of the test20 for debugging purposes.
+test-20f′ : ∀ n → Vec ℕ n → Vec (Vec ℕ 1) n → Vec (Vec ℕ 2) n
+test-20f′ n xs ys = xzip xs ys
+  where
+    xzip : ∀ {n} → Vec _ n → Vec _ n → Vec _ n
+    xzip []       []       = []
+    xzip (x ∷ xs) (y ∷ ys) = (x ∷ y) ∷ xzip xs ys
+
+test₂₀′ : kompile test-20f′ [] [] ≡ ok _
+test₂₀′ = refl
+
+
 -- Make sure that we can handle lists of hom. objects
 test-21f : ∀ n → List (Vec ℕ n)
 test-21f n = []
 
 test₂₁ : kompile test-21f [] [] ≡ ok _
 test₂₁ = refl
+
+
 
 -- Test that cons and friends work on a simple example
 test-22f : ∀ n → Vec (Vec ℕ n) 1
@@ -55,7 +73,7 @@ test₂₂ = refl
 test-23f : ∀ {X : Set} → X → X
 test-23f x = x
 
-test₂₃ : kompile test-23f [] [] ≡ error _
+test₂₃ : _≡_ {A = Prog} (kompile test-23f [] []) $ error _
 test₂₃ = refl
 
 
@@ -105,9 +123,9 @@ test₂₉ = refl
 --
 -- open import Data.Empty
 -- test-30f : Ar ⊥ 1 V.[ 1 ] → ⊥
--- test-30f (imap f) = {!!}
+-- test-30f (imap ())
 --
--- even though `f` has type Ix 1 [1] → ⊥, which doesn't exist.
+-- even though `f` in imap has type Ix 1 [1] → ⊥, which doesn't exist.
 
 -- If non-lambda is found as an argument of the imap.
 test-31f : Ar ℕ 1 V.[ 10 ] → Ar ℕ 1 V.[ 10 ]
@@ -134,7 +152,7 @@ module mat-mul where
                                     let i = ix-lookup iv (# 0)
                                         j = ix-lookup iv (# 1)
                                     in asum (imap λ kv → let k = ix-lookup kv (# 0)
-                                                          in a (i ∷ k ∷ []) * b (k ∷ j ∷ []))
+                                                         in a (i ∷ k ∷ []) * b (k ∷ j ∷ []))
 
   mm-kompiled = kompile mm [] (quote asum ∷ [])
   test₃₃ : mm-kompiled ≡ ok _
@@ -155,6 +173,8 @@ test₃₄ : test-34t ≡ ok ("\n\n// Function Example-02.test-34f\n"
                       ++ "return __ret;\n}\n\n")
 test₃₄ = refl
 
+
+
 test-35f : ∀ {d s} → Ix (suc d) s → ℕ
 test-35f {_} (_∷_ {d}{s}{x} i ix) =  x
 
@@ -166,3 +186,12 @@ test₃₅ : kompile test-35f [] [] ≡ ok ("\n\n// Function Example-02.test-35f
                                    ++ "i = hd (x_4);\nix = tl (x_4);\n__ret = x;\n"
                                    ++ "return __ret;\n}\n\n")
 test₃₅ = refl
+
+
+
+
+test-fold1 : ∀ {n} → Ar ℕ 1 V.[ n ] → Ar ℕ 1 V.[ n ]
+test-fold1 a = imap λ iv → sel a iv + 5
+
+test-fold : ∀ {n} → Ar ℕ 1 V.[ n ] → Ar ℕ 1 V.[ n ]
+test-fold a = imap λ iv → sel (test-fold1 a) iv + 6
