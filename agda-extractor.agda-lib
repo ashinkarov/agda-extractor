@@ -1,0 +1,5 @@
+name: agda-extractor
+include: .
+depend: 
+  standard-library-1.5
+  agda-arrays
