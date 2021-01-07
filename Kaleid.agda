@@ -272,6 +272,10 @@ kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _
   P.modify $ _p+=a (mk v (BinOp Eq x y))
   return $ ok tt
 
+kompile-ty (def (quote Dec) (_ ∷ arg _ p ∷ [])) _ = do
+  _ ← kompile-ty p false
+  return $ ok tt
+
 kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
 
 kompile-ty t _ =
@@ -395,6 +399,14 @@ kompile-clpats tel (arg i (con (quote ℕ.suc) ps) ∷ l) (v ∷ ctx) pst =
 -- For refl we don't need to generate a predicate, as refl is an element of a singleton type.
 kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
   kompile-clpats tel l ctx pst
+
+kompile-clpats tel (arg i (con (quote _because_) ps) ∷ l) (v ∷ ctx) pst = do
+  pf , pst ← pst-fresh pst $ "pf_"
+  kompile-clpats tel (ps ++ l) (v ∷ Var pf ∷ ctx) pst
+kompile-clpats tel (arg i (con (quote Reflects.ofʸ) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) (Nat 1 ∷ ctx) pst
+kompile-clpats tel (arg i (con (quote Reflects.ofⁿ) ps) ∷ l) (v ∷ ctx) pst =
+  kompile-clpats tel (ps ++ l) (Nat 0 ∷ ctx) pst
 
 kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
   s ← tel-lookup-name tel i
