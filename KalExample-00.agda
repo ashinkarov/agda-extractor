@@ -34,3 +34,17 @@ test3-f a b _ = a ∸ b
 
 test₃ : kompile test3-f [] [] ≡ ok _
 test₃ = refl
+
+test4-f : (x : ℕ) → x ≡ 0 → (y : ℕ) → x ≡ y → ℕ
+test4-f x () (suc y) refl
+test4-f x x=0 zero x=y = 0
+
+test₄ : kompile test4-f [] [] ≡ ok _
+test₄ = refl
+
+
+
+test5-f : (x y : ℕ) → x > y → ℕ
+test5-f 0 0 ()
+test5-f 0 x _ = x
+test5-f (suc x) y _ = x + y

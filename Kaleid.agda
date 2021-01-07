@@ -409,10 +409,10 @@ kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
   kompile-clpats tel l vars pst
 
 kompile-clpats tel (arg i (absurd _) ∷ l) (v ∷ ctx) pst =
-  -- If have met the absurd pattern, we are done, as
-  -- we have accumulated enough conditions to derive
-  -- impossibility.  So we are simply done.
-  ok pst
+  -- If have met the absurd pattern, we'd still have to
+  -- accumulate remaining conditions, as patterns are not
+  -- linear :(  For example, see test4-f in examples.
+  kompile-clpats tel l ctx pst
 
 
 kompile-clpats _ [] [] pst = ok pst
