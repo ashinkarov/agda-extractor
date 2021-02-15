@@ -20,13 +20,14 @@ open import Data.Bool using (Bool; true; false; if_then_else_)
 open import Data.Maybe using (Maybe; just; nothing)
 open import Data.Fin using (Fin; zero; suc; fromℕ<)
 
-open import Relation.Binary.PropositionalEquality using (_≡_; refl)
+open import Relation.Binary.PropositionalEquality using (_≡_; refl; cong; sym; subst)
 open import Relation.Nullary
 
 open import Reflection hiding (return; _>>=_; _>>_)
 open import Reflection.Term
 import      Reflection.Name as RN
 open import Function
+open import Strict
 
 open RawMonad ⦃ ... ⦄
 
@@ -174,7 +175,7 @@ SPS = State PS
 
 kompile-fun    : Type → Term → Name → SKS $ Err Expr
 kompile-pi     : Type → SPS $ Err ⊤
-{-# TERMINATING #-}
+--{-# TERMINATING #-}
 kompile-cls    : Clauses → (vars : Strings) → (ret : String) → SKS $ Err Expr
 kompile-clpats : Telescope → (pats : List $ Arg Pattern) → (exprs : List Expr) → PatSt → Err PatSt
 --{-# TERMINATING #-}
@@ -187,7 +188,7 @@ kompile-funp ty te n = do
       e = case a of λ where
             [] → e
             a  → L.foldr (uncurry Let) e a
-  return $ ok $ expr-to-string 0 e
+  return $ ok $ expr-to-string 0 e ++ "\n"
 
 private
   kf : String → Err Expr
@@ -264,6 +265,11 @@ kompile-ty (con c args) pi-ok =
   kp $ "don't know how to handle `" ++ showName c ++ "` constructor"
 kompile-ty (def (quote ℕ) args) _ = return $ ok tt
 kompile-ty (def (quote Bool) args) _ = return $ ok tt
+kompile-ty (def (quote Fin) (arg _ x ∷ [])) _ = do
+  ok p ← sps-kompile-term x where error x → ke x
+  v ← PS.cur <$> P.get
+  P.modify $ _p+=a (mk v (BinOp Lt (Var v) p))
+  return $ ok tt
 
 kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _ = do
   ok x ← sps-kompile-term x where error x → ke x
@@ -273,7 +279,7 @@ kompile-ty (def (quote _≡_) (_ ∷ arg _ ty ∷ arg _ x ∷ arg _ y ∷ [])) _
   return $ ok tt
 
 kompile-ty (def (quote Dec) (_ ∷ arg _ p ∷ [])) _ = do
-  _ ← kompile-ty p false
+  --_ ← kompile-ty p false
   return $ ok tt
 
 kompile-ty (def n _) _ = kp $ "cannot handle `" ++ showName n ++ "` type"
@@ -323,6 +329,18 @@ fold-expr f e [] = e
 fold-expr f _ (x ∷ []) = x
 fold-expr f e (x ∷ xs) = f x (fold-expr f e xs)
 
+emap : ∀ {a b}{X : Set a}{Y : Set b} → (X → Y) → Err X → Err Y
+emap f (error x) = error x
+emap f (ok x) = ok $ f x
+
+
+emap₂ : ∀ {a b c}{X : Set a}{Y : Set b}{Z : Set c}
+      → (X → Y → Z) → Err X → Err Y → Err Z
+emap₂ f (error x) _ = error x
+emap₂ f _ (error x) = error x
+emap₂ f (ok x) (ok y) = ok (f x y)
+
+
 kompile-cls [] ctx ret = kc "zero clauses found"
 kompile-cls (clause tel ps t ∷ []) ctx ret =
   -- Make telscope names unique.
@@ -356,9 +374,13 @@ kompile-cls (clause tel ps t ∷ ts@(_ ∷ _)) ctx ret =
   let (mk vars assgns conds _) = pst
       cs = fold-expr (BinOp And) (Nat 1) conds
       as = flip (L.foldr (uncurry Let)) assgns
-  ok t ← kompile-term t $! tel where (error x) → kc x --telv --{!!} --PS.ctx ps
-  ok r ← kompile-cls ts ctx ret where (error x) → kc x
-  return $ ok $ If cs (as t) r
+  --ok t ← kompile-term t tel where (error x) → kc x
+  --ok r ← kompile-cls ts ctx ret where (error x) → kc x
+  --return $ ok $ If cs (as t) r
+  t ← kompile-term t tel
+  r ← kompile-cls ts ctx ret
+  return $ emap₂ (If cs) (emap as t) r
+
 
 
 tel-lookup-name : Telescope → ℕ → Prog
@@ -387,53 +409,109 @@ private
   pst-fresh pst x =
     return $ x ++ showNat (PatSt.cnt pst) , pst +=n 1
 
-kompile-clpats tel (arg i (con (quote true) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel l ctx $ pst +=c v {- != 0 -} --is true
-kompile-clpats tel (arg i (con (quote false) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel l ctx $ pst +=c BinOp Eq v (Nat 0)
+  sz : List $ Arg Pattern → ℕ
+  sz [] = 0
+  sz (arg i (con c ps) ∷ l) = 1 + sz ps + sz l
+  sz (arg i _ ∷ l) = 1 + sz l
 
-kompile-clpats tel (arg i (con (quote ℕ.zero) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel l ctx $ pst +=c BinOp Eq v (Nat 0) --(v == 0)
-kompile-clpats tel (arg i (con (quote ℕ.suc) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel (ps ++ l) (BinOp Minus v (Nat 1) ∷ ctx) $ pst +=c BinOp Gt v (Nat 0) --(v > 0)
+  sz++ : ∀ (a b : List $ Arg Pattern) → sz (a L.++ b) ≡ sz a + sz b
+  sz++ [] b = refl
+  sz++ (arg i (con c ps) ∷ a) b rewrite ℕ.+-assoc (sz ps) (sz a) (sz b)
+    = cong suc (cong (sz ps +_) (sz++ a b))
+  sz++ (arg i (dot t) ∷ a) b = cong suc $ sz++ a b
+  sz++ (arg i (var x₁) ∷ a) b = cong suc $ sz++ a b
+  sz++ (arg i (lit l) ∷ a) b = cong suc $ sz++ a b
+  sz++ (arg i (proj f) ∷ a) b = cong suc $ sz++ a b
+  sz++ (arg i (absurd x₁) ∷ a) b = cong suc $ sz++ a b
+
+  ++-strict : ∀ {X : Set} (a b : List X) → a ++ b ≡ a L.++ b
+  ++-strict a b rewrite force′-≡ a L._++_ | force′-≡ b (L._++_ a) = refl
+
+  ps++l<m : ∀ {m} ps l → suc (sz ps + sz l) ℕ.< suc m → sz (ps ++ l) ℕ.< m
+  ps++l<m {m} ps l sz<m rewrite ++-strict ps l = subst (ℕ._< m) (sym $ sz++ ps l) (ℕ.≤-pred sz<m)
+
+  a<b⇒a<1+b : ∀ {a b} → a ℕ.< b → a ℕ.< 1 + b
+  a<b⇒a<1+b {a} {b} a<b = ℕ.s≤s (ℕ.<⇒≤ a<b)
+
+  a+b<c⇒b<c : ∀ {a b c} → a + b ℕ.< c → b ℕ.< c
+  a+b<c⇒b<c {zero} {b} {c} a+b<c = a+b<c
+  a+b<c⇒b<c {suc a} {b} {suc c} a+b<c = a<b⇒a<1+b $ a+b<c⇒b<c (ℕ.≤-pred a+b<c)
+
+  sz[l]<m : ∀ {m} ps l → suc (sz ps + sz l) ℕ.< suc m → sz l ℕ.< m
+  sz[l]<m {m} ps l sz<m = a+b<c⇒b<c $ ℕ.≤-pred sz<m
+
+--kompile-cls    : Clauses → (vars : Strings) → (ret : String) → SKS $ Err String
+
+
+
+
+kompile-clpats′ : ∀ {m} → Telescope → (pats : List $ Arg Pattern) → .(sz pats ℕ.< m)
+               → (exprs : List Expr) → PatSt → Err PatSt
+
+
+
+
+kompile-clpats′ {suc m} tel (arg i (con (quote true) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel l (sz[l]<m ps l sz<m) ctx $ pst +=c v {- != 0 -} --is true
+kompile-clpats′ {suc m} tel (arg i (con (quote false) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel l (sz[l]<m ps l sz<m) ctx $ pst +=c BinOp Eq v (Nat 0)
+
+kompile-clpats′ {suc m} tel (arg i (con (quote ℕ.zero) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel l (sz[l]<m ps l sz<m) ctx $ pst +=c BinOp Eq v (Nat 0) --(v == 0)
+kompile-clpats′ {suc m} tel (arg i (con (quote ℕ.suc) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel (ps ++ l) (ps++l<m ps l sz<m) (BinOp Minus v (Nat 1) ∷ ctx) $ pst +=c BinOp Gt v (Nat 0) --(v > 0)
+
+kompile-clpats′ {suc m} tel (arg i (con (quote F.zero) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel l (sz[l]<m ps l sz<m) ctx $ pst +=c BinOp Eq v (Nat 0) --(v ++ " == 0")
+kompile-clpats′ {suc m} tel (arg i (con (quote F.suc) ps@(_ ∷ _ ∷ [])) ∷ l) sz<m (v ∷ ctx) pst = do
+  (ub , pst) ← pst-fresh pst "ub_"
+  -- XXX here we are not using `ub` in conds.  For two reasons:
+  -- 1) as we have assertions, we should check the upper bound on function entry
+  -- 2) typically, the value of this argument would be Pat.dot, which we ignore
+  --    right now.  It is possible to capture the value of the dot-patterns, as
+  --    they carry the value when reconstructed.
+  kompile-clpats′ tel (ps ++ l) (ps++l<m ps l sz<m) (Var ub ∷ (BinOp Minus v (Nat 1)) ∷ ctx) $ pst +=c BinOp Gt v (Nat 0) --(v ++ " > 0")
+
 -- For refl we don't need to generate a predicate, as refl is an element of a singleton type.
-kompile-clpats tel (arg i (con (quote refl) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel l ctx pst
+kompile-clpats′ {suc m} tel (arg i (con (quote refl) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel l (sz[l]<m ps l sz<m) ctx pst
 
-kompile-clpats tel (arg i (con (quote _because_) ps) ∷ l) (v ∷ ctx) pst = do
+kompile-clpats′ {suc m} tel (arg i (con (quote _because_) ps) ∷ l) sz<m (v ∷ ctx) pst = do
   pf , pst ← pst-fresh pst $ "pf_"
-  kompile-clpats tel (ps ++ l) (v ∷ Var pf ∷ ctx) pst
-kompile-clpats tel (arg i (con (quote Reflects.ofʸ) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel (ps ++ l) (Nat 1 ∷ ctx) pst
-kompile-clpats tel (arg i (con (quote Reflects.ofⁿ) ps) ∷ l) (v ∷ ctx) pst =
-  kompile-clpats tel (ps ++ l) (Nat 0 ∷ ctx) pst
+  kompile-clpats′ tel (ps ++ l) (ps++l<m ps l sz<m) (v ∷ Var pf ∷ ctx) pst
+kompile-clpats′ {suc m} tel (arg i (con (quote Reflects.ofʸ) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel (ps ++ l) (ps++l<m ps l sz<m) (Nat 1 ∷ ctx) pst
+kompile-clpats′ {suc m} tel (arg i (con (quote Reflects.ofⁿ) ps) ∷ l) sz<m (v ∷ ctx) pst =
+  kompile-clpats′ tel (ps ++ l) (ps++l<m ps l sz<m) (Nat 0 ∷ ctx) pst
 
-kompile-clpats tel (arg (arg-info _ r) (var i) ∷ l) (v ∷ vars) pst = do
+kompile-clpats′ {suc m} tel (arg (arg-info _ r) (var i) ∷ l) sz<m (v ∷ vars) pst = do
   s ← tel-lookup-name tel i
   let pst = pst +=v (s , i)
   let pst = if does (s ≈? "_")
             then pst
             else pst +=a (s , v)
-  kompile-clpats tel l vars pst
+  kompile-clpats′ tel l (ℕ.≤-pred sz<m) vars pst
 
-kompile-clpats tel (arg i (dot t) ∷ l) (v ∷ vars) pst =
+kompile-clpats′ {suc m} tel (arg i (dot t) ∷ l) sz<m (v ∷ vars) pst =
   -- For now we just skip dot patterns.
-  kompile-clpats tel l vars pst
+  kompile-clpats′ tel l (ℕ.≤-pred sz<m) vars pst
 
-kompile-clpats tel (arg i (absurd _) ∷ l) (v ∷ ctx) pst =
+kompile-clpats′ {suc m} tel (arg i (absurd _) ∷ l) sz<m (v ∷ ctx) pst =
   -- If have met the absurd pattern, we'd still have to
   -- accumulate remaining conditions, as patterns are not
   -- linear :(  For example, see test4-f in examples.
-  kompile-clpats tel l ctx pst
+  kompile-clpats′ tel l (ℕ.≤-pred sz<m) ctx pst
 
 
-kompile-clpats _ [] [] pst = ok pst
-kompile-clpats tel ps ctx patst = kcp $ "failed on pattern: ["
+kompile-clpats′ _ [] _ [] pst = ok pst
+
+kompile-clpats′ tel ps _ ctx patst = kcp $ "failed on pattern: ["
                                      ++ (", " ++/ L.map (λ where (arg _ x) → showPattern x) ps)
                                      ++ "], ctx: [" ++ (", " ++/ (L.map (expr-to-string 0) ctx)) ++ "]"
 
 
 
+kompile-clpats tel pats ctx pst = kompile-clpats′ {m = suc (sz pats)} tel pats ℕ.≤-refl ctx pst
 
 
 private
@@ -457,6 +535,15 @@ le-to-el : ∀ {a}{X : Set a} → List (Err X) → Err (List X)
 le-to-el [] = ok []
 le-to-el (x ∷ l) = _∷_ <$> x ⊛ le-to-el l
 
+mk-iota-mask : ℕ → List ℕ
+mk-iota-mask n = L.reverse $! go n []
+  where
+    go : ℕ → List ℕ → List ℕ
+    go zero l = l
+    go (suc n) l = n ∷ go n l
+
+
+{-
 kompile-arglist : (n : ℕ) → List $ Arg Term → List $ Fin n → Telescope → SKS $ Err (List Expr)
 kompile-arglist n args mask varctx with L.length args ℕ.≟ n | V.fromList args
 ... | yes p | vargs rewrite p = do
@@ -466,6 +553,24 @@ kompile-arglist n args mask varctx with L.length args ℕ.≟ n | V.fromList arg
               where open TraversableM (StateMonad KS)
 
 ... | no ¬p | _ = kt "Incorrect argument mask"
+-}
+
+kompile-arglist-idx : List $ Arg Term → (idx : ℕ) → Telescope → SKS $ Err Expr
+kompile-arglist-idx [] _ tel = return $ error "incorrect arglist index"
+kompile-arglist-idx (arg _ x ∷ args) zero tel = kompile-term x tel
+kompile-arglist-idx (x ∷ args) (suc n) tel = kompile-arglist-idx args n tel
+
+
+kompile-arglist : List $ Arg Term → List ℕ → Telescope → SKS $ Err (List Expr)
+kompile-arglist args [] tel = return $ ok []
+kompile-arglist args (x ∷ idxs) tel = do
+  ok t ← kompile-arglist-idx args x tel where (error x) → return $ error x
+  ok ts ← kompile-arglist args idxs tel where (error x) → return $ error x
+  return $ ok $ t ∷ ts
+
+
+
+
 
 kompile-term (var x []) vars =
   return $ Var <$> tel-lookup-name vars x
@@ -473,7 +578,8 @@ kompile-term (var x []) vars =
 kompile-term (var x args@(_ ∷ _)) vars = do
   let f = tel-lookup-name vars x
       l = L.length args
-  args ← kompile-arglist l args (mk-mask l) vars
+  --args ← kompile-arglist l args (mk-mask l) vars
+  args ← kompile-arglist args (mk-iota-mask l) vars
   return $ Call <$> f ⊛ args
 
 kompile-term (lit l@(nat x)) vars = return $ ok $ Nat x
@@ -481,6 +587,12 @@ kompile-term (lit l@(nat x)) vars = return $ ok $ Nat x
 kompile-term (con (quote ℕ.zero) _) _ =
   return $ ok $ Nat 0
 kompile-term (con (quote ℕ.suc) (arg _ a ∷ [])) vars = do
+  a ← kompile-term a vars
+  return $ BinOp <$> ok Plus ⊛ ok (Nat 1) ⊛ a
+
+kompile-term (con (quote F.zero) _) _ =
+  return $ ok $ Nat 0
+kompile-term (con (quote F.suc) (_ ∷ arg _ a ∷ [])) vars = do
   a ← kompile-term a vars
   return $ BinOp <$> ok Plus ⊛ ok (Nat 1) ⊛ a
 
@@ -506,20 +618,32 @@ kompile-term (def (quote ℕ._≟_) (arg _ a ∷ arg _ b ∷ [])) vars = do
   b ← kompile-term b vars
   return $ BinOp <$> ok Eq ⊛ a ⊛ b
 
--- The last pattern in the list of `def` matches
-kompile-term (def n []) _ =
-  kt $ "attempting to compile `" ++ showName n ++ "` as function with 0 arguments"
-
 kompile-term (def (quote _+_) args@(arg _ a ∷ arg _ b ∷ [])) vars = do
   a ← kompile-term a vars
   b ← kompile-term b vars
   return $ BinOp <$> ok Plus ⊛ a ⊛ b
 
+kompile-term (def (quote ℕ._*_) args@(arg _ a ∷ arg _ b ∷ [])) vars = do
+  a ← kompile-term a vars
+  b ← kompile-term b vars
+  return $ BinOp <$> ok Times ⊛ a ⊛ b
+
+kompile-term (def (quote F.fromℕ<) args) vars = do
+  ok (x ∷ []) ← kompile-arglist args (0 ∷ []) vars
+                where _ → kt "kopmile-arglist is broken"
+  return $ ok x
+
+-- The last pattern in the list of `def` matches
+kompile-term (def n []) _ =
+  kt $ "attempting to compile `" ++ showName n ++ "` as function with 0 arguments"
+
 kompile-term (def n args@(_ ∷ _)) vars = do
   R.modify λ k → record k { funs = KS.funs k ++ [ n ] }
   let n = {-nnorm $-} showName n
       l = L.length args
-  args ← kompile-arglist l args (mk-mask l) vars
+  --args ← kompile-arglist l args (mk-mask l) vars
+  args ← kompile-arglist args (mk-iota-mask l) vars
   return $ Call <$> ok n ⊛ args
+
 
 kompile-term t vctx = kt $ "failed to compile term `" ++ showTerm t ++ "`"

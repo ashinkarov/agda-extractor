@@ -1,15 +1,16 @@
 open import Kaleid as K using ()
-open import Extract (K.kompile-funp)
+open import Extract (K.kompile-funp) using (kompile)
 open import ReflHelper
 
 open import Data.Nat
 open import Data.Nat.Properties
 open import Data.List as L using (List; []; _∷_)
 
+open import Data.Fin using (Fin; zero; suc; fromℕ<)
 open import Relation.Binary.PropositionalEquality
 open import Relation.Nullary
 
-open import Reflection hiding (_≟_)
+open import Reflection hiding (_≟_; _>>=_; return)
 
 open import Structures
 open import Function
@@ -56,3 +57,20 @@ test6-f x y with x ≟ y
 ... | _ = 2
 
 test₆ = kompile test6-f (quote _≟_ ∷ []) []
+
+test7-f : (n : ℕ) → Fin (suc (n * n))
+test7-f n = fromℕ< ≤-refl
+
+
+test8-f : ℕ → ℕ
+test8-f x = let a = x * x + 3 * x + 5 in a + a
+
+
+test-args : (a b c d : ℕ) → ℕ
+test-args a b c d = a + b + c + d
+
+test-args2 : (a b : ℕ) → ℕ
+test-args2 a b = test-args a b a b
+
+
+
